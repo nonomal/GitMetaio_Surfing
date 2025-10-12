@@ -250,7 +250,7 @@ Http.get(url2 .. "?t=" .. os.time(), nil, "UTF-8", headers, function(code, conte
                     addStyledText("IPv4: " .. ipV4, 14, 0xFF444444)
                     
                     Http.get("https://api-ipv6.ip.sb/geoip", nil, "UTF-8", headers, function(ipv6Code, ipv6Content)
-                        local ipV6Text = "IPv6: 当前网络不支持"
+                        local ipV6Text = "IPv6: 当前节点不支持"
                         if ipv6Code == 200 and ipv6Content and ipv6Content:match("%S") then
                             local ok, objV6 = pcall(function() return JSONObject(ipv6Content) end)
                             if ok then

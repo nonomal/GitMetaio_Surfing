@@ -82,6 +82,10 @@ Http.get(url2 .. "?t=" .. os.time(), nil, "UTF-8", headers, function(code, conte
                 local subPop = PopupMenu(activity, more)
                 local subMenu = subPop.Menu
 
+                subMenu.add("IPW.CN").onMenuItemClick = function()
+                    webView.loadUrl("https://ipw.cn/")
+                end
+
                 subMenu.add("纯IPv6测试").onMenuItemClick = function()
                     webView.loadUrl("https://ipv6.test-ipv6.com/")
                 end

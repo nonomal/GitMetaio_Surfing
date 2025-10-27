@@ -81,62 +81,51 @@ Http.get(url2 .. "?t=" .. os.time(), nil, "UTF-8", headers, function(code, conte
             menu.add("IP 检查").onMenuItemClick = function()
                 local subPop = PopupMenu(activity, more)
                 local subMenu = subPop.Menu
-
-                subMenu.add("IPW.CN").onMenuItemClick = function()
+                subMenu.add("IPw.cn").onMenuItemClick = function()
                     webView.loadUrl("https://ipw.cn/")
                 end
-
                 subMenu.add("纯IPv6测试").onMenuItemClick = function()
                     webView.loadUrl("https://ipv6.test-ipv6.com/")
                 end
-
                 subMenu.add("网站延迟").onMenuItemClick = function()
                     webView.loadUrl("https://ip.skk.moe/simple")
                 end
-
                 subMenu.add("DNS泄露测试 (browserscan)").onMenuItemClick = function()
                     webView.loadUrl("https://www.browserscan.net/zh/dns-leak")
                 end
-
                 subMenu.add("DNS泄露测试 (Surfshark)").onMenuItemClick = function()
                     webView.loadUrl("https://surfshark.com/zh/dns-leak-test")
                 end
-
                 subPop.show()
             end
 
             menu.add("切换面板").onMenuItemClick = function()
                 local subPop = PopupMenu(activity, more)
                 local subMenu = subPop.Menu
-
                 subMenu.add("Meta").onMenuItemClick = function()
                     local url = "https://metacubex.github.io/metacubexd/#/proxies"
                     webView.loadUrl(url)
                     defaultUrl = url
                     saveDefaultUrl(url)
                 end
-
                 subMenu.add("Yacd").onMenuItemClick = function()
                     local url = "https://yacd.mereith.com/#/proxies"
                     webView.loadUrl(url)
                     defaultUrl = url
                     saveDefaultUrl(url)
                 end
-
                 subMenu.add("Zash").onMenuItemClick = function()
                     local url = "https://board.zash.run.place/#/proxies"
                     webView.loadUrl(url)
                     defaultUrl = url
                     saveDefaultUrl(url)
                 end
-
                 subMenu.add("Local（本地端口）").onMenuItemClick = function()
                     local url = "http://127.0.0.1:9090/ui/#/proxies"
                     webView.loadUrl(url)
                     defaultUrl = url
                     saveDefaultUrl(url)
                 end
-
                 subPop.show()
             end
 
@@ -178,16 +167,13 @@ Http.get(url2 .. "?t=" .. os.time(), nil, "UTF-8", headers, function(code, conte
                 scrollView.addView(logText)
 
                 local dp = activity.getResources().getDisplayMetrics().density
-                local layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    math.floor(200 * dp + 0.5)
-                )
+                local layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, math.floor(200 * dp + 0.5))
                 scrollView.setLayoutParams(layoutParams)
                 layout.addView(scrollView)
 
                 local builder = AlertDialog.Builder(activity)
                 builder.setView(layout)
-                builder.setNegativeButton("Git", nil)
+                builder.setNegativeButton("GitHub", nil)
                 builder.setPositiveButton("Telegram", nil)
                 builder.setNeutralButton("取消", nil)
                 builder.setCancelable(false)
@@ -209,33 +195,41 @@ Http.get(url2 .. "?t=" .. os.time(), nil, "UTF-8", headers, function(code, conte
 
                 dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setAllCaps(false)
 
-                Http.get("https://api-ipv4.ip.sb/geoip", nil, "UTF-8", headers, function(geoCode, geoContent)
-                    if geoCode == 200 and geoContent then
-                        local obj = JSONObject(geoContent)
-                        local timezone = obj.optString("timezone", "获取失败...")
-                        local isp = obj.optString("isp", "获取失败...")
-                        local asn = obj.optInt("asn", 0)
-                        local ipV4 = obj.optString("ip", "获取失败...")
-                        addStyledText("\nAPI ip.sb", 14, 0xFF444444)
-                        addStyledText(timezone, 14, 0xFF444444)
-                        addStyledText(isp, 14, 0xFF444444)
-                        addStyledText("ASN: " .. asn, 14, 0xFF444444)
-                        addStyledText("IPv4: " .. ipV4, 14, 0xFF444444)
-                    end
+                addStyledText("\nAPI ip.sb", 14, 0xFF444444)
+                local timezoneTv = addStyledText("正在获取时区...", 14, 0xFF444444)
+                local ispTv = addStyledText("正在获取 ISP...", 14, 0xFF444444)
+                local asnTv = addStyledText("ASN: ...", 14, 0xFF444444)
+                local ipv4Tv = addStyledText("IPv4: ...", 14, 0xFF444444)
+                local ipv6Tv = addStyledText("IPv6: ...", 14, 0xFF444444)
 
-                    Http.get("https://api-ipv6.ip.sb/geoip", nil, "UTF-8", headers, function(ipv6Code, ipv6Content)
-                        local ipV6Text = "IPv6: 当前节点不支持"
-                        if ipv6Code == 200 and ipv6Content and ipv6Content:match("%S") then
-                            local ok, objV6 = pcall(function() return JSONObject(ipv6Content) end)
-                            if ok then
-                                local ipV6 = objV6.optString("ip", "")
-                                if ipV6 ~= "" then ipV6Text = "IPv6: " .. ipV6 end
-                            end
-                        end
-                        addStyledText(ipV6Text, 14, 0xFF444444)
-                        addStyledText("\n@Surfing Web.apk 2023.", 16, 0xFF444444)
-                    end)
+                Http.get("https://api-ipv4.ip.sb/geoip", nil, "UTF-8", headers, function(code, content)
+                    if code == 200 and content then
+                        local obj = JSONObject(content)
+                        timezoneTv.setText(obj.optString("timezone", "获取失败..."))
+                        ispTv.setText(obj.optString("isp", "获取失败..."))
+                        asnTv.setText("ASN: " .. obj.optInt("asn", 0))
+                        ipv4Tv.setText("IPv4: " .. obj.optString("ip", "获取失败..."))
+                    else
+                        timezoneTv.setText("时区获取失败")
+                        ispTv.setText("ISP 获取失败")
+                        asnTv.setText("ASN 获取失败")
+                        ipv4Tv.setText("IPv4 获取失败")
+                    end
                 end)
+
+                Http.get("https://api-ipv6.ip.sb/geoip", nil, "UTF-8", headers, function(code, content)
+                    local ipV6Text = "IPv6: 当前节点不支持"
+                    if code == 200 and content and content:match("%S") then
+                        local ok, objV6 = pcall(function() return JSONObject(content) end)
+                        if ok then
+                            local ip = objV6.optString("ip", "")
+                            if ip ~= "" then ipV6Text = "IPv6: " .. ip end
+                        end
+                    end
+                    ipv6Tv.setText(ipV6Text)
+                end)
+
+                addStyledText("\n@Surfing Web.apk 2023.", 16, 0xFF444444)
             end
 
             local function getLastCommitTime()
@@ -251,10 +245,8 @@ Http.get(url2 .. "?t=" .. os.time(), nil, "UTF-8", headers, function(code, conte
                                 hour = tonumber(commitDate:sub(12, 13)),
                                 min = tonumber(commitDate:sub(15, 16)),
                                 sec = tonumber(commitDate:sub(18, 19))
-                            })
-                            timestamp = timestamp + 8 * 60 * 60
-                            local formattedDate = os.date("%Y-%m-%d %H:%M:%S", timestamp)
-                            showVersionInfo(formattedDate, updateLog)
+                            }) + 8 * 3600
+                            showVersionInfo(os.date("%Y-%m-%d %H:%M:%S", timestamp))
                         else
                             showVersionInfo("获取失败！")
                         end

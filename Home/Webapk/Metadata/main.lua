@@ -21,16 +21,16 @@ Http.get(url2 .. "?t=" .. os.time(), nil, "UTF-8", headers, function(code, conte
     if code == 200 and content then
         local pushNotification = content:match("推送通知:%s*(.-)\n") or "关"
         local menuTitle = content:match("菜单标题:%s*(.-)\n") or "信息通知"
-       
+
         more.onClick = function()
             local pop = PopupMenu(activity, more)
             local menu = pop.Menu
 
-            menu.add("清除数据").onMenuItemClick = function(a)
+            menu.add("清除数据").onMenuItemClick = function()
                 local builder = AlertDialog.Builder(activity)
                 builder.setTitle("注意")
                 builder.setMessage("此操作会清除自身全部数据并退出！")
-                builder.setPositiveButton("确定", function(dialog, which)
+                builder.setPositiveButton("确定", function()
                     activity.finish()
                     if activity.getPackageName() ~= "net.fusionapp" then
                         os.execute("pm clear " .. activity.getPackageName())
@@ -41,14 +41,14 @@ Http.get(url2 .. "?t=" .. os.time(), nil, "UTF-8", headers, function(code, conte
                 builder.show()
             end
 
-            menu.add("设置 URL").onMenuItemClick = function(a)
+            menu.add("设置 URL").onMenuItemClick = function()
                 local builder = AlertDialog.Builder(activity)
                 builder.setTitle("设置URL")
                 builder.setMessage("请输入要设置默认访问的链接：")
                 local input = EditText(activity)
                 input.setHint("http:// 或 https:// 开头...")
                 builder.setView(input)
-                builder.setPositiveButton("确定", function(dialog, which)
+                builder.setPositiveButton("确定", function()
                     local url = input.getText().toString()
                     if url ~= "" and string.match(url, "^https?://[%w%._%-]+[%w%._%/?&%=%-]*") then
                         defaultUrl = url
@@ -81,10 +81,6 @@ Http.get(url2 .. "?t=" .. os.time(), nil, "UTF-8", headers, function(code, conte
             menu.add("IP 检查").onMenuItemClick = function()
                 local subPop = PopupMenu(activity, more)
                 local subMenu = subPop.Menu
-
-                subMenu.add("IPW_CN").onMenuItemClick = function()
-                    webView.loadUrl("https://ipw.cn/")
-                end
 
                 subMenu.add("纯IPv6测试").onMenuItemClick = function()
                     webView.loadUrl("https://ipv6.test-ipv6.com/")
@@ -212,11 +208,15 @@ Http.get(url2 .. "?t=" .. os.time(), nil, "UTF-8", headers, function(code, conte
                 Http.get("https://api-ipv4.ip.sb/geoip", nil, "UTF-8", headers, function(geoCode, geoContent)
                     if geoCode == 200 and geoContent then
                         local obj = JSONObject(geoContent)
+                        local timezone = obj.optString("timezone", "获取失败...")
+                        local isp = obj.optString("isp", "获取失败...")
+                        local asn = obj.optInt("asn", 0)
+                        local ipV4 = obj.optString("ip", "获取失败...")
                         addStyledText("\nAPI ip.sb", 14, 0xFF444444)
-                        addStyledText(obj.optString("timezone", "获取失败..."), 14, 0xFF444444)
-                        addStyledText(obj.optString("isp", "获取失败..."), 14, 0xFF444444)
-                        addStyledText("ASN: " .. obj.optInt("asn", 0), 14, 0xFF444444)
-                        addStyledText("IPv4: " .. obj.optString("ip", "获取失败..."), 14, 0xFF444444)
+                        addStyledText(timezone, 14, 0xFF444444)
+                        addStyledText(isp, 14, 0xFF444444)
+                        addStyledText("ASN: " .. asn, 14, 0xFF444444)
+                        addStyledText("IPv4: " .. ipV4, 14, 0xFF444444)
                     end
 
                     Http.get("https://api-ipv6.ip.sb/geoip", nil, "UTF-8", headers, function(ipv6Code, ipv6Content)
@@ -229,34 +229,7 @@ Http.get(url2 .. "?t=" .. os.time(), nil, "UTF-8", headers, function(code, conte
                             end
                         end
                         addStyledText(ipV6Text, 14, 0xFF444444)
-
-                        Http.get("https://6.ipw.cn", nil, "UTF-8", headers, function(code, content)
-                            local ipText, networkTypeText
-                            if code == 200 and content then
-                                local ipv6 = content:match("([0-9a-fA-F:]+:[0-9a-fA-F:]+)")
-                                if ipv6 then
-                                    ipText, networkTypeText = ipv6, "您的网络 IPv6 优先"
-                                end
-                            end
-
-                            addStyledText("\nIPw.cn", 14, 0xFF444444)
-                            if ipText then
-                                addStyledText(networkTypeText, 14, 0xFF444444)
-                                addStyledText(ipText, 14, 0xFF444444)
-                            else
-                                Http.get("https://4.ipw.cn", nil, "UTF-8", headers, function(v4code, v4content)
-                                    local ipv4 = v4content and v4content:match("(%d+%.%d+%.%d+%.%d+)")
-                                    if v4code == 200 and ipv4 then
-                                        addStyledText("当前网络 IPv6 不可达，使用 IPv4", 14, 0xFF444444)
-                                        addStyledText(ipv4, 14, 0xFF444444)
-                                    else
-                                        addStyledText("当前网络 IPv6/IPv4 不可达，可能网站错误", 14, 0xFF444444)
-                                    end
-                                end)
-                            end
-
-                            addStyledText("@Surfing Web.apk 2023.", 16, 0xFF444444)
-                        end)
+                        addStyledText("\n@Surfing Web.apk 2023.", 16, 0xFF444444)
                     end)
                 end)
             end
@@ -311,8 +284,6 @@ Http.get(url2 .. "?t=" .. os.time(), nil, "UTF-8", headers, function(code, conte
 
             pop.show()
         end
-    else
-        -- 失败处理逻辑
     end
 end)
 

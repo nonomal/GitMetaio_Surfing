@@ -60,7 +60,7 @@ Http.get(url2 .. "?t=" .. os.time(), nil, "UTF-8", headers, function(code, conte
                 end
             end
             
-            menu.add("Surfingtile 设置").onMenuItemClick = function()
+            menu.add("磁贴设置").onMenuItemClick = function()
                 local targetPkg = " "
                 local targetAct = " "
                 local intent = Intent()

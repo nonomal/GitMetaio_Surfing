@@ -330,7 +330,7 @@ Http.get(url2 .. "?t=" .. os.time(), nil, "UTF-8", headers, function(code, conte
                 menu.add(menuTitle).onMenuItemClick = function()
                     Toast.makeText(activity, "正在拉取中...", Toast.LENGTH_SHORT).show()
                     Handler().postDelayed(function()
-                        loadInfo()
+                        loadInfo(content)
                     end, 2700)
                 end
             end

@@ -1,91 +1,101 @@
 #!/system/bin/sh
- 
+export PATH="/data/adb/box_bll/bin:$PATH"
+
+SYS_IP="/system/bin/ip"
+SYS_IPTABLES="/system/bin/iptables"
+SYS_IP6TABLES="/system/bin/ip6tables"
+
 events=$1
- 
+
 scripts=$(realpath "$0")
 scripts_dir=$(dirname "$scripts")
- 
-source ${scripts_dir}/box.config
-source ${scripts_dir}/box.iptables
+
+. "${scripts_dir}/box.config"
+. "${scripts_dir}/box.iptables"
+
+export TZ=Asia/Shanghai
+RUN_LOG="${run_path}/run.log"
+ERR_LOG="${run_path}/run_error.log"
+
+mkdir -p "${run_path}"
+
+log() {
+    local now=$(date +"[%Y-%m-%d %H:%M:%S %Z]")
+    local level=$1
+    local msg=$2
+    printf "%s [%s]: %s\n" "${now}" "${level}" "${msg}" >> "${RUN_LOG}"
+}
 
 CLASH_CONFIG="/data/adb/box_bll/clash/config.yaml"
-LINKCLEAR_LOG="/data/adb/box_bll/run/linkclear.log"
 
-TZ=Asia/Shanghai
-export TZ
- 
 TMP_DIR="/dev/tmp"
 LINKCLEAR_LOCK="${TMP_DIR}/linkclear.lock"
 BOOT_STABLE_FLAG="${TMP_DIR}/boot_stable.flag"
-RULES_ADD_FLAG="${TMP_DIR}/rules_add_executed.flag"
+RULES_LOCK="${TMP_DIR}/rules_add.lock"
 
 uptime_sec=$(awk '{print int($1)}' /proc/uptime)
 
 clear_links() {
     [ ! -f "$BOOT_STABLE_FLAG" ] && return
-    
-    now=$(date +%s)
-    
+    now_ts=$(date +%s)
     if [ -f "$LINKCLEAR_LOCK" ]; then
         last=$(cat "$LINKCLEAR_LOCK")
-        [ $((now - last)) -lt 15 ] && return
+        [ $((now_ts - last)) -lt 15 ] && return
     fi
-    echo "$now" > "$LINKCLEAR_LOCK"
-    
-    PORT=$(grep -E '^[[:space:]]*external-controller:' "$CLASH_CONFIG" \
-        | head -n1 | cut -d':' -f3 | cut -d'#' -f1 | tr -d '\r\n ')
-    curl -s -X DELETE "http://127.0.0.1:${PORT}/connections" >/dev/null 2>&1
+    echo "$now_ts" > "$LINKCLEAR_LOCK"
+
+    local PORT=$(awk '/^[[:space:]]*external-controller:/ {gsub(/#.*/, ""); sub(/.*:/, ""); gsub(/[[:space:]"'\''\r\n\t]/, ""); print; exit}' "$CLASH_CONFIG")
+    local RAW_SECRET=$(awk -F'[:#]' '/^[[:space:]]*secret:/ {gsub(/[[:space:]"\r\n\t]/, "", $2); print $2; exit}' "$CLASH_CONFIG")
+    {
+        if [ -n "$RAW_SECRET" ]; then
+            curl -s -H "Authorization: Bearer $RAW_SECRET" -X DELETE "http://127.0.0.1:${PORT}/connections"
+        else
+            curl -s -X DELETE "http://127.0.0.1:${PORT}/connections"
+        fi
+    } >/dev/null 2>&1
 }
 
 rules_add() {
-    iptables -t mangle -F LOCAL_IP_V4
-    ip -4 a | awk '/inet/ {print $2}' | grep -vE "^127\.0\.0\.1" | while read -r local_ipv4; do
-     iptables -w 100 -t mangle -A LOCAL_IP_V4 -d "$local_ipv4" -j ACCEPT
-     iptables -w 100 -t nat -A LOCAL_IP_V4 -d "$local_ipv4" -j ACCEPT
+    local now_ts=$(date +%s)
+    if [ -f "$RULES_LOCK" ]; then
+        local last_ts=$(cat "$RULES_LOCK")
+        [ $((now_ts - last_ts)) -lt 2 ] && return
+    fi
+    echo "$now_ts" > "$RULES_LOCK"
+
+    ${SYS_IP} -4 a | awk '/inet/ {print $2}' | grep -vE "^127.0.0.1" | while read -r local_ipv4; do
+        local added=false
+        for table in mangle nat; do
+            if ! ${SYS_IPTABLES} -w 100 -t $table -C LOCAL_IP_V4 -d "$local_ipv4" -j ACCEPT 2>/dev/null; then
+                ${SYS_IPTABLES} -w 100 -t $table -A LOCAL_IP_V4 -d "$local_ipv4" -j ACCEPT 2>/dev/null && added=true
+            fi
+        done
+        if [ "$added" = true ]; then
+            log Info "已动态更新防回环地址 IPv4: $local_ipv4"
+        fi
     done
-    
-    ip6tables -t mangle -F LOCAL_IP_V6
-    ip -6 a | awk '/inet6/ {print $2}' | grep -vE "^fe80|^::1" | while read -r local_ipv6; do
-     ip6tables -w 100 -t mangle -A LOCAL_IP_V6 -d "$local_ipv6" -j ACCEPT
+    ${SYS_IP} -6 a | awk '/inet6/ {print $2}' | grep -vE "^fe80|^::1" | while read -r local_ipv6; do
+        local added6=false
+        if ! ${SYS_IP6TABLES} -w 100 -t mangle -C LOCAL_IP_V6 -d "$local_ipv6" -p udp ! --dport 53 -j ACCEPT 2>/dev/null; then
+            ${SYS_IP6TABLES} -w 100 -t mangle -A LOCAL_IP_V6 -d "$local_ipv6" -p udp ! --dport 53 -j ACCEPT 2>/dev/null && added6=true
+        fi
+        if ! ${SYS_IP6TABLES} -w 100 -t mangle -C LOCAL_IP_V6 -d "$local_ipv6" ! -p udp -j ACCEPT 2>/dev/null; then
+            ${SYS_IP6TABLES} -w 100 -t mangle -A LOCAL_IP_V6 -d "$local_ipv6" ! -p udp -j ACCEPT 2>/dev/null && added6=true
+        fi
+        if [ "$added6" = true ]; then
+            log Info "已动态更新防回环地址 IPv6: $local_ipv6"
+        fi
     done
     clear_links
- }
- 
-if [ "$events" = "w" ]; then
-    if [ -f "$BOOT_STABLE_FLAG" ]; then
-        last_exec_time=$(stat -c %Y "$BOOT_STABLE_FLAG")
-        current_time=$(date +%s)
-        time_diff=$((current_time - last_exec_time))
- 
-        if [ "$time_diff" -lt 30 ]; then
-            exit 0
-        fi
+}
+
+[ "$events" = "w" ] && {
+    rules_add;
+    sleep 1;
+    bin_pid=$(pidof "${bin_name}")
+    if [ -n "${bin_pid}" ] && [ "$ipv6" = "disable" ]; then
+        disable_ipv6;
     fi
- 
-    sleep 3
-    rules_add
- 
-    sleep 1
-    if [ "$ipv6" = "disable" ]; then
-        disable_ipv6
-    fi
-fi
- 
-if [ "$uptime_sec" -lt 360 ] && [ ! -f "$BOOT_STABLE_FLAG" ]; then
-    sleep 60
-    rules_add
-    touch "$BOOT_STABLE_FLAG"
-fi
- 
-if [ ! -f "/data/adb/modules/Surfing/disable" ]; then
-    if [ -f "$RULES_ADD_FLAG" ]; then
-        exit 0
-    fi
-    sleep 10
-    rules_add
-    touch "$RULES_ADD_FLAG" 
-else
-    if [ -f "$RULES_ADD_FLAG" ]; then
-        rm -f "$RULES_ADD_FLAG"
-    fi
-fi
+}
+
+{ [ "$uptime_sec" -lt 360 ] && [ ! -f "$BOOT_STABLE_FLAG" ]; } && { sleep 60; rules_add; touch "$BOOT_STABLE_FLAG"; }

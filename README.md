@@ -10,7 +10,7 @@
         <img alt="Android" src="https://img.shields.io/badge/Module Latestsnapshot-F05033.svg?logo=android&logoColor=white">
     </a>
     <a href="https://github.com/GitMetaio/Surfing/releases">
-    <img alt="Downloads" src="https://img.shields.io/github/downloads/GitMetaio/Surfing/total?label=Module%20Download&labelColor=00b56a&logo=git&logoColor=white">
+    <img alt="Downloads" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/GitMetaio/Surfing/data/stats.json">
 </a>
 </div>
 <br>
@@ -65,28 +65,40 @@ Please decide whether to use the Surfing module only after clearly understanding
 - Download the module zip file from the [Release](https://github.com/GitMetaio/Surfing/releases) page and install it via Magisk Manager, KernelSU Manager, or APatch.
 - Version changes: [📲log](changelog.md)
 
-## Uninstallation
+## Uninstall
 
-- Simply uninstall this module from Magisk Manager, Kernelsu Manager, or APatch app [👉🏻Uninstall Script](https://github.com/GitMetaio/Surfing/blob/main/uninstall.sh#L3-L4)
+- Uninstall this module directly from **Magisk Manager / KernelSU Manager / APatch**  
+  [👉🏻 Force Remove Script](https://github.com/GitMetaio/Surfing/blob/main/uninstall.sh#L3-L4)
 
-> Uninstalling this module via a manager will remove all associated service data. Web-related tiles or APKs may need to be uninstalled manually.
+> Uninstalling this module via the manager will remove all related service data, including Web and SurfingTile tile app data.
+
+## Group Telegram
+
+<a href="https://t.me/Surfingbox">
+  <img src="./folder/IMG_20260218_112257.jpg" alt="Group" width="100">
+</a>
 
 ## Wiki
 
 <details>
-<summary>1. First-Time Use</summary>
+<summary>1. FirstTime Use</summary>
 
-- After the module is installed for the first time, **please first** add your subscription URL in `/data/adb/box_bll/clash/config.yaml`, then manually reboot your device once.
-- After rebooting, toggle the module switch once, open the **Web** app on your desktop, and you can start using it.
+- After the module is installed for the first time, **please first** add your subscription URL in  
+  `/data/adb/box_bll/clash/config.yaml`, or do it via the Web Desktop App  
+  (**Note: SurfingTile must be invoked and Root permission is required**), then manually reboot your device once.
+- After rebooting, toggle the module switch once, open the **Web App** on your desktop, and you can start using it.
 - Due to network issues, not all **rules**/**subscriptions** may download automatically; please manually refresh them in the panel.
 - If subscriptions fail to load, try switching the **Ua** in the configuration file.
 - If the above fails, ensure your network environment is normal.
 
 - Web App:
+    - Can be used via Menu → Config Override → Fill in subscription
     - Used for portable browsing and managing backend routing data
-    - Automatically updates core files on startup
 
-<img src="./folder/Webapk.png" alt="Web UI" width="300">
+<img src="./folder/app.png" alt="App UI" width="300">
+
+> If the panel content is displayed abnormally or cannot be displayed,  
+> please update the `com.google.android.webview` component via Google Play Store.
 
 </details>
 
@@ -96,8 +108,10 @@ Please decide whether to use the Surfing module only after clearly understanding
 <summary>2. Controlling Operation</summary>
 
 - You can control start/stop via **WiFi SSID**.
-- You can control service in real-time using the module toggle switch.
-- You can add the module's control tile to the system status bar. If the tile switch cannot be found after installing the module and rebooting, you can manually install the APK [Download Source](https://raw.githubusercontent.com/GitMetaio/Surfing/main/folder/SurfingTile.tar.gz)
+- You can control service using the module toggle switch  
+  `Changes take effect in real time, no reboot required`
+- You can add the module's control tile to the system status bar  
+  `If SurfingTile is already installed`
 
 </details>
 
@@ -106,9 +120,10 @@ Please decide whether to use the Surfing module only after clearly understanding
 <details>
 <summary>3. Routing Rules</summary>
 
-GitHub Actions automatically builds every day at 6 AM Beijing time to ensure the rules are up-to-date.
+- GitHub Actions builds automatically  
+  All routing rules use online subscriptions to ensure they are always up-to-date
 
-> All routing rules use online links and update automatically 24/7.
+> Automatically updates every 24 hours
 
 </details>
 
@@ -118,7 +133,7 @@ GitHub Actions automatically builds every day at 6 AM Beijing time to ensure the
 <summary>4. Future Updates</summary>
 
 - If you are using all default configurations, updates will be seamless.
-- Supports online updates from the client; reboot is not required but still recommended.
+- Supports online updates from the client; reboot is not required, but still recommended.
 - During updates, configuration files will be backed up to:
    - `config.yaml.bak`
 - User configuration files will be backed up to:
@@ -127,7 +142,7 @@ GitHub Actions automatically builds every day at 6 AM Beijing time to ensure the
    - `proxies/subscribe_urls_backup.txt`
    - The backup will be automatically restored into the new configuration, suitable for default configuration usage.
 
-> Note: Updates mainly follow upstream changes and may push some configuration adjustments.
+> Ps: Mainly follows upstream updates and pushes some configuration adjustments.
 
 </details>
 
@@ -136,11 +151,19 @@ GitHub Actions automatically builds every day at 6 AM Beijing time to ensure the
 <details>
 <summary>5. Usage Issues</summary>
 
-**1. Proxy Specific Apps (Blacklist/Whitelist)**
+### Proxy Specific Apps (Blacklist / Whitelist)
 
-- To proxy all apps except certain ones, open `/data/adb/box_bll/scripts/box.config`, set `proxy_mode` to `blacklist` (default), and add elements to the `user_packages_list` array in the format `id:package_name`, separated by spaces. These apps will **not** be proxied. Example: `user_packages_list=("id:package_name" "id:package_name")`
+- To proxy all apps except certain ones, open `/data/adb/box_bll/scripts/box.config`,  
+  set `proxy_mode` to `blacklist` (default), and add elements to the `user_packages_list` array.  
+  The element format is `id:package_name`, separated by spaces.  
+  These apps will **not** be proxied.  
+  Example: `user_packages_list=("id:package_name" "id:package_name")`
 
-- To proxy only specific apps, open `/data/adb/box_bll/scripts/box.config`, set `proxy_mode` to `whitelist`, and add elements to the `user_packages_list` array in the format `id:package_name`, separated by spaces. Only these apps will be proxied. Example: `user_packages_list=("id:package_name" "id:package_name")`
+- To proxy only specific apps, open `/data/adb/box_bll/scripts/box.config`,  
+  set `proxy_mode` to `whitelist`, and add elements to the `user_packages_list` array.  
+  The element format is `id:package_name`, separated by spaces.  
+  Only these apps will be proxied.  
+  Example: `user_packages_list=("id:package_name" "id:package_name")`
 
 Android user group IDs:
 
@@ -152,42 +175,59 @@ Android user group IDs:
 
 > You can usually find all user group IDs and app package names under `/data/user/`.
 
-**2. Tun Mode**
-
-- Enabled by default
-- Better traffic management
+### Tun Mode
+- Disabled by default
 - When using blacklist/whitelist, exclude the corresponding package names
 
-> Can be disabled via configuration if needed.
+> Can be enabled or disabled manually via configuration if needed.
 
-**3. Routing Rules**
-
+### Routing Rules
 - Optimized for Mainland China
 - Meets most daily usage requirements
 
-> With increasingly robust routing rules, blacklist/whitelist may become less necessary.
+> With increasingly robust routing rules, blacklist/whitelist is becoming less necessary.
 
-**4. Panel Management**
-
+### Panel Management
 - Magisk font modules
 
 > May affect proper display of panel fonts.
 
-**5. LAN Sharing**
-
+### LAN Sharing
 - Enable hotspot to allow other devices to connect
 - Tun Gateway: `172.20.0.1`
 
-> To access the backend console from other devices: `http://<CurrentWiFi>/172.20.0.1:9090/ui`
+> To access the backend console from other devices:  
+> `http://<CurrentWiFi>/<TunGateway>:9090/ui`
 
-**6. Host File**
-
+### Host File
 - No need to mount: just delete the file
 - To remount: create a new one in the **etc folder**
 - All changes take effect immediately
-- During update/installation, you can use volume keys Up(Mount) / Down(Unmount) to choose whether to mount
+- During update/installation, you can use volume keys Up(**Mount**) / Down(**Unmount**) to choose
 
 > Local IP redirection for domains, forced binding
+
+</details>
+
+#
+
+<details>
+<summary>6. SurfingTile</summary>
+
+### APP Service
+### 📱 Device Requirements
+> Supports Android 10+
+
+- Must run in **system space** and require **Root** permission
+- For **KSU** users, you need to install the **"Meta Module"** to obtain mount permissions
+- The tile works entirely based on the **Clash API**, please check if the API settings are correct
+  - **Path:** → Home Settings → More Settings → Port Settings
+
+### Hidden Easter Egg
+> Long press the home icon to toggle **Gold Privilege**
+
+- Preview
+  ![App Interface](folder/IMG_20260813_032529.jpg)
 
 </details>
 
@@ -197,7 +237,7 @@ Android user group IDs:
     <img alt="License" src="https://img.shields.io/github/license/GitMetaio/Surfing.svg">
 </a>
 
-## Acknowledgments
+## Acknowledgements
 
 <div align="center">
   <a href="https://github.com/CHIZI-0618">
@@ -205,14 +245,6 @@ Android user group IDs:
     <br>
     <strong>CHIZI-0618</strong>
   </a>
-</div>
-
-<div align="center">
-  <a href="https://github.com/MetaCubeX"><strong>MetaCubeX</strong></a>
-</div>
-
-<div align="center">
-  <a href="https://github.com/Loyalsoldier"><strong>Loyalsoldier</strong></a>
 </div>
 
 <div align="center">

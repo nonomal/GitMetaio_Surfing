@@ -1,37 +1,53 @@
 #!/system/bin/sh
 
-modules_dir="/data/adb/modules/Surfing"
-[ -n "$(magisk -v | grep lite)" ] && MODULE_DIR="/data/adb/lite_modules/Surfing"
+export PATH="/data/adb/box_bll/bin:$PATH"
 
+BASE_MODULES_DIR="/data/adb/modules"
+[ -n "$(magisk -v | grep lite)" ] && BASE_MODULES_DIR="/data/adb/lite_modules"
+
+SURFING_DIR="${BASE_MODULES_DIR}/Surfing"
 SCRIPTS_DIR="/data/adb/box_bll/scripts"
 
 (
-until [ "$(getprop sys.boot_completed)" -eq 1 ]; do
+until [ "$(getprop sys.boot_completed)" = "1" ]; do
   sleep 3
 done
-${SCRIPTS_DIR}/start.sh
+"${SCRIPTS_DIR}/start.sh"
 ) &
 
-HOSTS_PATH="/data/adb/box_bll/clash/etc/"
-HOSTS_FILE="/data/adb/box_bll/clash/etc/hosts"
+HOSTS_PATH="/data/adb/box_bll/clash/etc"
+HOSTS_FILE="${HOSTS_PATH}/hosts"
 SYSTEM_HOSTS="/system/etc/hosts"
 
-mkdir -p "$HOSTS_PATH" "/dev/tmp/"
+mkdir -p "$HOSTS_PATH" "/dev/tmp"
+
+if [ -f "$HOSTS_FILE" ]; then
+    mount -o bind "$HOSTS_FILE" "$SYSTEM_HOSTS" 2>/dev/null
+fi
 
 sleep 1
+safe_inotifyd() {
+    local script="$1"
+    local target="$2"
+    pkill -f "inotifyd $script $target" > /dev/null 2>&1
+    sleep 0.5
+    nohup inotifyd "$script" "$target" > /dev/null 2>&1 &
+}
 
-inotifyd ${SCRIPTS_DIR}/box.inotify ${modules_dir} > /dev/null 2>&1 &
-inotifyd ${SCRIPTS_DIR}/box.inotify "$HOSTS_PATH" > /dev/null 2>&1 &
-    
-mount -o bind "$HOSTS_FILE" "$SYSTEM_HOSTS"
+safe_inotifyd "${SCRIPTS_DIR}/box.inotify" "$SURFING_DIR"
+safe_inotifyd "${SCRIPTS_DIR}/box.inotify" "$HOSTS_PATH"
 
+(
 NET_DIR="/data/misc/net"
-while [ ! -f /data/misc/net/rt_tables ]; do
+CTR_FILE="/data/misc/net/rt_tables"
+
+while [ ! -f "$CTR_FILE" ]; do
   sleep 3
 done
 
-inotifyd ${SCRIPTS_DIR}/net.inotify "$NET_DIR" > /dev/null 2>&1 &
-inotifyd ${SCRIPTS_DIR}/ctr.inotify /data/misc/net/rt_tables > /dev/null 2>&1 &
+safe_inotifyd "${SCRIPTS_DIR}/net.inotify" "$NET_DIR"
+safe_inotifyd "${SCRIPTS_DIR}/ctr.inotify" "$CTR_FILE"
+) &
 
 delete_op_coloros16_fw_rules() {
     brand=$(getprop ro.product.brand | tr '[:upper:]' '[:lower:]')
@@ -42,14 +58,13 @@ delete_op_coloros16_fw_rules() {
             return 0
             ;;
     esac
-    sleep 60
+
+    sleep 120
+
     CHAINS="fw_INPUT fw_OUTPUT"
     PROTOS="ipv4 ipv6"
     for proto in $PROTOS; do
-        case "$proto" in
-            ipv4) cmd="iptables" ;;
-            ipv6) cmd="ip6tables" ;;
-        esac
+        [ "$proto" = "ipv4" ] && cmd="iptables" || cmd="ip6tables"
         
         for chain in $CHAINS; do
             $cmd -t filter -nL "$chain" >/dev/null 2>&1 || continue
@@ -64,4 +79,5 @@ delete_op_coloros16_fw_rules() {
         done
     done
 }
+
 delete_op_coloros16_fw_rules &

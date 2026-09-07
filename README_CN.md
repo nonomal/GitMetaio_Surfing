@@ -10,7 +10,7 @@
         <img alt="Android" src="https://img.shields.io/badge/Module Latestsnapshot-F05033.svg?logo=android&logoColor=white">
     </a>
     <a href="https://github.com/GitMetaio/Surfing/releases">
-    <img alt="Downloads" src="https://img.shields.io/github/downloads/GitMetaio/Surfing/total?label=Module%20Download&labelColor=00b56a&logo=git&logoColor=white">
+    <img alt="Downloads" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/GitMetaio/Surfing/data/stats.json">
 </a>
 </div>
 <br>
@@ -31,7 +31,7 @@
 
 本模块需在 Magisk/Kernelsu 环境进行使用，如果你不知道如何配置所需环境，你可能需要像 ClashForAndroid、v2rayNG、surfboard、SagerNet、AnXray 等应用程序。  
 
-[Windows 用户](https://github.com/GitMetaio/Surfing/releases/tag/Windows)
+[Windows 用户](https://github.com/GitMetaio/SurfingWin)
 
 # Surfing用户声明及免责
 
@@ -70,26 +70,35 @@
 
 ## 卸载
 
- - 从 Magisk Manager 、Kernelsu Manager 、APatch 应用卸载本模块即可 [👉🏻铲屎命令](https://github.com/GitMetaio/Surfing/blob/main/uninstall.sh#L3-L4)
+ - 从 Magisk Manager 、Kernelsu Manager 、APatch 应用卸载本模块即可 [👉🏻铲屎流程](https://github.com/GitMetaio/Surfing/blob/main/uninstall.sh#L3-L4)
 
-> 通过管理器卸载本模块，会卸载所有相应的服务数据，Web等磁贴 Apk 可能需手动卸载
+> 通过管理器卸载本模块，会卸载所有相应的服务数据，Web 等 SurfingTile 磁贴应用数据
+
+## Group Telegram
+
+<a href="https://t.me/Surfingbox">
+  <img src="./folder/IMG_20260218_112257.jpg" alt="Group" width="100">
+</a>
 
 ## Wiki
 
 <details>
 <summary>1. 首次使用</summary>
 
-- 首次安装模块完成后，**请先**于 `/data/adb/box_bll/clash/config.yaml` 添加你的订阅地址，随后需手动重启设备一次
+- 首次安装模块完成后，**请先**于 `/data/adb/box_bll/clash/config.yaml` 添加你的订阅地址，亦或者通过 Web 桌面 App(**注意: 需调用SurfingTile且持有Root才能操作**)，随后需手动重启设备一次
 - 设备重启后，切换模块开关一次，桌面打开 **Web App** 即可开始使用
 - 可能因网络原因不会自动下载完全部 **规则**/**订阅**，请至面板手动刷新一下
 - 如遇订阅无法加载请尝试切换配置文件里面的 **Ua**
 - 如上述失败，确保你的网络环境正常
 
 - Web App：
+    - 可用于通过菜单 → 配置覆写 → 填写订阅
     - 用于便携浏览及管理后台路由数据
-    - 启动时会自动更新核心文件
+  
+<img src="./folder/app.png" alt="App UI" width="300">
 
-<img src="./folder/Webapk.png" alt="Web UI" width="300">
+> 如遇面板显示内容异常 / 或内容无法显示  
+需通过 Google play 商店更新 com.google.android.webview 组件版本
 
 </details>
 
@@ -98,9 +107,11 @@
 <details>
 <summary>2. 控制运行</summary>
 
-- 可通过 **WiFi SSID** 网络控制启停
-- 可通过模块开关进行 关闭/开启 控制运行服务实时生效
-- 可向系统状态栏添加模块的控制开关磁贴，如安装模块重启设备后无法找到磁贴开关，你可以手动进行安装Apk [下载源码](https://raw.githubusercontent.com/GitMetaio/Surfing/main/folder/SurfingTile.tar.gz)
+- 可通过 WiFi SSID 网络控制启停
+- 可通过模块开关进行 关闭/开启 控制运行  
+  `操作实时生效无需重启`
+- 可向系统状态栏添加模块的控制开关磁贴  
+  `如已安装SurfingTile`
 
 </details>
 
@@ -109,9 +120,10 @@
 <details>
 <summary>3. 路由规则</summary>
 
-GitHub Actions 北京时间每天早上 6 点自动构建，保证规则最新
+- GitHub Actions 自动构建  
+  路由规则全系在线订阅，保证规则最新
 
-> 路由规则全使用在线链接，24小时自动更新
+> 24小时自动更新
 
 </details>
 
@@ -139,7 +151,7 @@ GitHub Actions 北京时间每天早上 6 点自动构建，保证规则最新
 <details>
 <summary>5. 使用问题</summary>
 
-一、代理特定应用程序(黑白名单)
+### 代理特定应用程序(黑白名单)
 - 代理所有应用程序，除了某些特定的应用外，那么请打开 `/data/adb/box_bll/scripts/box.config` 文件，修改 `proxy_mode` 的值为 `blacklist`（默认值），在 `user_packages_list` 数组中添加元素，数组元素格式为`id标识:应用包名`，元素之间用空格隔开。即可**不代理**相应安卓用户应用。例如 `user_packages_list=("id标识:应用包名" "id标识:应用包名")`
 
 - 只代理特定的应用程序，那么请打开 `/data/adb/box_bll/scripts/box.config` 文件，修改 `proxy_mode` 的值为 `whitelist`，在 `user_packages_list` 数组中添加元素，数组元素格式为`id标识:应用包名`，元素之间用空格隔开。即可**仅代理**相应安卓用户应用。例如 `user_packages_list=("id标识:应用包名" "id标识:应用包名")`
@@ -154,37 +166,58 @@ GitHub Actions 北京时间每天早上 6 点自动构建，保证规则最新
 
 > 通常你可以在`/data/user/`找到本机所有用户组id及应用包名
 
-二、Tun模式
-- 默认开启
-- 更好的流量管理
+### Tun模式
+- 默认关闭
 - 使用黑白名单时需排除相应包名
 
 > 如特殊需要可自行通过配置关闭
 
-三、路由规则
+### 路由规则
 - 为大陆饶行
 - 基本能满足大多数日常使用需求
 
 > 在分流规则日益健壮的情况下 黑白名单意义不大
 
-四、面板管理
+### 面板管理
 - Magisk字体模块
 
 > 会影响页面字体正常显示
 
-五、局域网共享
+### 局域网共享
 - 开启热点让其它设备连接即可
 - Tun 网关: `172.20.0.1`
 
 > 其它设备若访问控制台后端: `http://当前WiFi/Tun网关:9090/ui`
 
-六、Host文件
+### Host文件
 - 无需挂载：删除该文件即可
 - 重新挂载：在 **etc文件夹** 新建一个即可
 - 所有修改均实时生效
-- 更新/安装时可通过音量键 上(挂) 下(卸) 选择是否挂载
+- 更新/安装时可通过音量键 上(**挂载**) 下(**卸载**) 选择
 
 > 域名本地IP重定向，强制绑定
+
+</details>
+
+#
+
+<details>
+<summary>6. SurfingTile</summary>
+
+### APP Service
+### 📱设备要求
+> 支持 Android10+
+
+- 需要工作在**系统空间**，并且持有 **Root** 权限
+- 对于 **KSU** 用户，则需要安装 **"元模块"** 才能拥有挂载权限
+- 磁贴全程围绕 **Clash API** 工作，请检查 API 设置是否正确
+  - **路径:** → 主页设置 → 更多设置 → 端口设置
+
+### 隐藏彩蛋
+> 通过长按首页图标 开启/关闭 **金牌特权**
+
+- 预览
+  ![程序界面](folder/IMG_20260813_032529.jpg)
 
 </details>
 
@@ -202,14 +235,6 @@ GitHub Actions 北京时间每天早上 6 点自动构建，保证规则最新
     <br>
     <strong>CHIZI-0618</strong>
   </a>
-</div>
-
-<div align="center">
-  <a href="https://github.com/MetaCubeX"><strong>MetaCubeX</strong></a>
-</div>
-
-<div align="center">
-  <a href="https://github.com/Loyalsoldier"><strong>Loyalsoldier</strong></a>
 </div>
 
 <div align="center">

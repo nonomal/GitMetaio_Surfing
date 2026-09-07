@@ -1,0 +1,153 @@
+[
+    {
+        "versionName": "v6.0.0",
+        "changelog": [
+            "Build Date: 2026-09-07 06:37:15",
+            "",
+            "代理页支持 iOS 液态玻璃风格的主题",
+            "代理页、关于页 均支持，及各种动态媒体",
+            "",
+            "全新的软件包名、App 无需挂载固化子模块",
+            "",
+            "控制面板高度适配 Zephyruso/zashboard",
+            "",
+            "网络过滤支持 SSID/MAC 模式匹配",
+            "",
+            "Shell 更高效的调用",
+            "",
+            "该版本需要搭配模块 v7.8.4以上",
+            "不知不觉 Surfing 已经满3周年啦！"
+        ],
+        "fileSize": 10673892,
+        "sha256": "0a42f3ff1565b9e7ab8942b89babb848ab91a9200134e02bf4481de7e76f0b84",
+        "downloadUrl": "https://raw.githubusercontent.com/GitMetaio/Surfing/main/app/version/com.github.surfing/SurfingTile_{VER}_release.apk"
+    },
+    {
+        "versionName": "v5.38.2",
+        "changelog": [
+            "Build Timestamp: 2026-08-15 03:30:28",
+            "",
+            "【UI 界面】",
+            "优化 字体显示字重，文字层级更清晰",
+            "优化 各界面交互逻辑，操作更加流畅",
+            "优化 RecyclerView 架构，提升整体性能",
+            "",
+            "【关于组件】",
+            "全新 背景渐变层液态流体，无限动态混合",
+            "支持 设备信息卡片个性化 iOS 液态磨砂玻璃",
+            "支持 展示设备的运存、订阅总量、电量显示",
+            "支持 长按设备卡片，开启你的专属视觉空间",
+            "",
+            "【配置覆写】",
+            "支持 “总模式” 策略组引用全部节点",
+            "支持 订阅更新、健康检查等配置",
+            "支持 订阅管理 “启动服务时是否自动更新”",
+            "",
+            "【代理组件】",
+            "支持 设置超时时间及胶囊气泡颜色阈值",
+            "",
+            "【更新组件】",
+            "支持 静默更新，以绕过系统安装器限制",
+            "修复 当切换系统主题后导致视图及状态丢失",
+            "",
+            "【服务检查】",
+            "支持 更多检测项",
+            "",
+            "【DEBUG】",
+            "修复已知问题，提升稳定性"
+        ],
+        "fileSize": 9329807,
+        "sha256": "885221203cdb2125c7170cc1744a606e2b8e2ab9a900c8de9b7d840eb49f89e3",
+        "downloadUrl": "https://raw.githubusercontent.com/GitMetaio/Surfing/main/app/version/com.surfing.tile/SurfingTile_{VER}_release.apk"
+    },
+    {
+        "versionName": "v5.35.5",
+        "changelog": [
+            "修复已知问题，提升稳定性"
+        ],
+        "fileSize": 8337094,
+        "sha256": "2e367fcdd2d4e438c46b452991cc0d568800e07aaec8c97f79c7d4aa77c88a6f",
+        "downloadUrl": "https://raw.githubusercontent.com/GitMetaio/Surfing/main/app/version/com.surfing.tile/SurfingTile_{VER}_release.apk"
+    },
+    {
+        "versionName": "v5.35.4",
+        "changelog": [
+            "修复已知问题，提升稳定性"
+        ],
+        "fileSize": 8336650,
+        "sha256": "4d163a5bdca9fe09716f75ff7000ac9beb129b74406db0894d512237cd7066b0",
+        "downloadUrl": "https://raw.githubusercontent.com/GitMetaio/Surfing/main/app/version/com.surfing.tile/SurfingTile_{VER}_release.apk"
+    },
+    {
+        "versionName": "v5.35.3",
+        "changelog": [
+            "修复已知问题，提升稳定性"
+        ],
+        "fileSize": 8336558,
+        "sha256": "6c221fdb8d4f2d15a4abde715277ae8c3b73521892956159b4c74040425e75e8",
+        "downloadUrl": "https://raw.githubusercontent.com/GitMetaio/Surfing/main/app/version/com.surfing.tile/SurfingTile_{VER}_release.apk"
+    },
+    {
+        "versionName": "v5.35.2",
+        "changelog": [
+            "修复已知问题，提升稳定性"
+        ],
+        "fileSize": 8385162,
+        "sha256": "5173a3710ae960bc8108779c85bb54ae64b3079d80068c8ab612c847e94d787f",
+        "downloadUrl": "https://raw.githubusercontent.com/GitMetaio/Surfing/main/app/version/com.surfing.tile/SurfingTile_{VER}_release.apk"
+    },
+    {
+        "versionName": "v5.35.1",
+        "changelog": [
+            "修复已知问题，提升稳定性"
+        ],
+        "fileSize": 8385158,
+        "sha256": "75758d82949ce35539bd5be5bab26d9950f64306a322d082448add82d6a4c4c7",
+        "downloadUrl": "https://raw.githubusercontent.com/GitMetaio/Surfing/main/app/version/com.surfing.tile/SurfingTile_{VER}_release.apk"
+    },
+    {
+        "versionName": "v5.35.0",
+        "changelog": [
+            "修复已知问题，提升稳定性"
+        ],
+        "fileSize": 8385730,
+        "sha256": "f13a86d2dffd12c9c0286e822fbba1eddb999b15b649d5d58da744289fa138e3",
+        "downloadUrl": "https://raw.githubusercontent.com/GitMetaio/Surfing/main/app/version/com.surfing.tile/SurfingTile_{VER}_release.apk"
+    },
+    {
+        "versionName": "v5.31.10",
+        "changelog": [
+            "【新增代理面板】",
+            "节点状态一目了然，长按顶部以定位选中",
+            "支持双击回顶、IPv6 测试及模式无缝切换",
+            "",
+            "【底层架构升级】",
+            "Moshi 高性能 JSON 解析，数据处理更高效",
+            "支持供应商订阅启动时是否更新，实时生效",
+            "修复已知问题，提升使用体验",
+            "",
+            "7月份版本，让 SurfingTile 再次伟大！"
+        ],
+        "fileSize": 8331566,
+        "sha256": "63f7ed62b0a7ace9c4439539c453c32b978ab4ff9569c08804a58991541d489a",
+        "downloadUrl": "https://raw.githubusercontent.com/GitMetaio/Surfing/main/app/version/com.surfing.tile/SurfingTile_{VER}_release.apk"
+    },
+    {
+        "versionName": "v5.30.0",
+        "changelog": [
+            "- 修复了已知稳定性问题"
+        ],
+        "fileSize": 5261860,
+        "sha256": "2ef2516e3ed0d7651bbec700ccc99e33f58426f73cae4d937b97687ac61da13c",
+        "downloadUrl": "https://raw.githubusercontent.com/GitMetaio/Surfing/main/app/version/com.surfing.tile/SurfingTile_{VER}_release.apk"
+    },
+    {
+        "versionName": "v5.29.0",
+        "changelog": [
+            "- 修复了已知稳定性问题"
+        ],
+        "fileSize": 5260700,
+        "sha256": "e937fa4082f00e5f6e7af382b2b69176bf36aa8812052780cde874c818f1bff4",
+        "downloadUrl": "https://raw.githubusercontent.com/GitMetaio/Surfing/main/app/version/com.surfing.tile/SurfingTile_{VER}_release.apk"
+    }
+]

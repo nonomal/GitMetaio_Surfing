@@ -1,587 +1,852 @@
-#!/system/bin/sh  
-  
-export PATH="/data/adb/magisk:/data/adb/ksu/bin:/data/adb/ap/bin:$PATH:/data/data/com.termux/files/usr/bin"  
-  
-scripts=$(realpath $0)  
-scripts_dir=$(dirname ${scripts})  
-  
-source ${scripts_dir}/box.config  
+#!/system/bin/sh
+export PATH="/data/adb/box_bll/bin:$PATH"
 
-mark_id="16777216/16777216"  
-table_id="2024"  
-# routing_mark="233"  
-  
+SYS_IP="/system/bin/ip"
+SYS_IPTABLES="/system/bin/iptables"
+SYS_IP6TABLES="/system/bin/ip6tables"
+
+scripts=$(realpath "$0")
+scripts_dir=$(dirname "${scripts}")
+
+. "${scripts_dir}/box.config"
+
+mark_id="16777216/16777216"
+table_id="2024"
+tun_table_index=${table_id:-2024}
+# routing_mark="233"
+
 log() {
-export TZ=Asia/Shanghai
-now=$(date +"[%Y-%m-%d %H:%M:%S %Z]")
-case $1 in
-Info)
-[ -t 1 ] && echo -e "\033[1;32m${now} [信息]: $2\033[0m" || echo "${now} [Info]: $2"
-;;
-Warn)
-[ -t 1 ] && echo -e "\033[1;33m${now} [警告]: $2\033[0m" || echo "${now} [Warn]: $2"
-;;
-Error)
-[ -t 1 ] && echo -e "\033[1;31m${now} [错误]: $2\033[0m" || echo "${now} [Error]: $2"
-;;
-*)
-[ -t 1 ] && echo -e "\033[1;30m${now} [$1]: $2\033[0m" || echo "${now} [$1]: $2"
-;;
-esac
+    export TZ=Asia/Shanghai
+    local now=$(date +"[%Y-%m-%d %H:%M:%S %Z]")
+    case "$1" in
+        Info)
+            [ -t 1 ] && printf "\033[1;32m%s [Info]: %s\033[0m\n" "${now}" "$2" || echo "${now} [Info]: $2"
+            ;;
+        Warn)
+            [ -t 1 ] && printf "\033[1;33m%s [Warn]: %s\033[0m\n" "${now}" "$2" || echo "${now} [Warn]: $2"
+            ;;
+        Error)
+            [ -t 1 ] && printf "\033[1;31m%s [Error]: %s\033[0m\n" "${now}" "$2" || echo "${now} [Error]: $2"
+            ;;
+        *)
+            [ -t 1 ] && printf "\033[1;30m%s [%s]: %s\033[0m\n" "${now}" "$1" "$2" || echo "${now} [$1]: $2"
+            ;;
+    esac
 }
-  
-uid_list=()  
-find_packages_uid() {  
-  for user_package in ${user_packages_list[@]} ; do  
-    user=$(echo ${user_package} | awk -F ':' '{print $1}')  
-    package=$(echo ${user_package} | awk -F ':' '{print $2}')  
-    uid="$(awk '{if($1=="'${package}'"){print $2}}' /data/system/packages.list)"  
-    if [[ -n "${uid}" ]]; then  
-      uid_list[${#uid_list[@]}]=$(expr ${user} \* "100000" + ${uid})  
-    fi  
-  done  
-}  
-  
-probe_user_group() {  
-  if bin_pid=$(busybox pidof ${bin_name}) ; then  
-    box_user=$(stat -c %U /proc/${bin_pid})  
-    box_group=$(stat -c %G /proc/${bin_pid})  
-    return 0  
-  else  
-    box_user=$(echo ${box_user_group} | awk -F ':' '{print $1}')  
-    box_group=$(echo ${box_user_group} | awk -F ':' '{print $2}')  
-    return 1  
-  fi  
-}  
+
+check_tproxy_support() {
+    if ${SYS_IPTABLES} -w 100 -t mangle -A PREROUTING -p tcp -j TPROXY --on-port 1234 --tproxy-mark 1 2>/dev/null; then
+        ${SYS_IPTABLES} -w 100 -t mangle -D PREROUTING -p tcp -j TPROXY --on-port 1234 --tproxy-mark 1 2>/dev/null
+        return 0
+    fi
+    return 1
+}
+
+optimize_kernel() {
+  local file_timeout="/proc/sys/net/netfilter/nf_conntrack_udp_timeout"
+  local file_stream="/proc/sys/net/netfilter/nf_conntrack_udp_timeout_stream"
+
+  echo 1 > /proc/sys/net/ipv4/conf/all/route_localnet
+  echo 1 > /proc/sys/net/ipv4/conf/default/route_localnet
+
+  settings put global tether_offload_disabled 0 >/dev/null 2>&1
+
+  if [ -f "$file_timeout" ]; then
+    sysctl -w net.netfilter.nf_conntrack_udp_timeout=30 >/dev/null 2>&1 || echo 30 > "$file_timeout" 2>/dev/null
+
+    if [ -f "$file_stream" ]; then
+        sysctl -w net.netfilter.nf_conntrack_udp_timeout_stream=15 >/dev/null 2>&1 || echo 15 > "$file_stream" 2>/dev/null
+    fi
+
+    local check_val=$(cat "$file_timeout" 2>/dev/null)
+    if [ "$check_val" != "30" ]; then
+      if command -v magiskpolicy >/dev/null 2>&1; then
+          magiskpolicy --live "allow su proc_net file write" 2>/dev/null
+          echo 30 > "$file_timeout" 2>/dev/null
+      fi
+    fi
+  fi
+}
+
+uid_list=()
+find_packages_uid() {
+  for user_package in "${user_packages_list[@]}" ; do
+    user=$(echo "${user_package}" | awk -F ':' '{print $1}')
+    package=$(echo "${user_package}" | awk -F ':' '{print $2}')
+    uid="$(awk -v target="${package}" '$1 == target {print $2; exit}' /data/system/packages.list)"
+    case "$uid" in
+      ''|*[!0-9]*)
+        log Warn "UID 解析: 无法获取 [${package}] 的有效 UID，已跳过接管."
+        continue
+        ;;
+    esac
+    if [ -n "${uid}" ]; then
+      uid_list[${#uid_list[@]}]=$((user * 100000 + uid))
+    fi
+  done
+}
+
+probe_user_group() {
+  local bin_pid=$(pidof "${bin_name}" | awk '{print $1}')
+  if [ -n "${bin_pid}" ] && [ -d "/proc/${bin_pid}" ]; then
+    box_user=$(stat -c %u "/proc/${bin_pid}")
+    box_group=$(stat -c %g "/proc/${bin_pid}")
+    log Info "环境检查: 进程 [${bin_name}] (PID: ${bin_pid}, UID: ${box_user}, GID: ${box_group}) 已就绪."
+    return 0
+  fi
+  return 1
+}
 
 start_redirect() {
-  ${iptables} -t nat -N BOX_EXTERNAL 
-  ${iptables} -t nat -F BOX_EXTERNAL 
-  ${iptables} -t nat -N BOX_LOCAL 
-  ${iptables} -t nat -F BOX_LOCAL 
-  
-  if [ "${bin_name}" = "clash" ]; then
-    ${iptables} -t nat -A BOX_EXTERNAL -p udp --dport 53 -j REDIRECT --to-ports ${clash_dns_port}
-    ${iptables} -t nat -A BOX_LOCAL -p udp --dport 53 -j REDIRECT --to-ports ${clash_dns_port}
-    ${iptables} -t nat -A BOX_EXTERNAL -d ${fake_ip_range_v4} -p icmp -j DNAT --to-destination 127.0.0.1
-    ${iptables} -t nat -A BOX_LOCAL -d ${fake_ip_range_v4} -p icmp -j DNAT --to-destination 127.0.0.1
-  fi
-  
-  ${iptables} -t nat -N LOCAL_IP_V4
-  ${iptables} -t nat -F LOCAL_IP_V4 
-  
-  for subnet in ${intranet[@]} ; do
-    ${iptables} -t nat -A BOX_EXTERNAL -d ${subnet} -j RETURN
-    ${iptables} -t nat -A BOX_LOCAL -d ${subnet} -j RETURN
+  log Info "正在注入: REDIRECT IPv4 防火墙规则."
+  ${iptables} -t nat -N BOX_EXTERNAL
+  ${iptables} -t nat -F BOX_EXTERNAL
+
+  ${iptables} -t nat -N LOCAL_IP_V4 2>/dev/null
+  ${iptables} -t nat -F LOCAL_IP_V4
+  for subnet in "${intranet[@]}" ; do
+    ${iptables} -t nat -A BOX_EXTERNAL -d "${subnet}" -j RETURN
   done
-  
   ${iptables} -t nat -A BOX_EXTERNAL -j LOCAL_IP_V4
-  ${iptables} -t nat -A BOX_LOCAL -j LOCAL_IP_V4
-  
-  ${iptables} -t nat -A BOX_EXTERNAL -p tcp -i lo -j REDIRECT --to-ports ${redir_port}
-  
-  if [ "${ap_list}" != "" ] ; then
-    for ap in ${ap_list[@]} ; do
-      ${iptables} -t nat -A BOX_EXTERNAL -p tcp -i ${ap} -j REDIRECT --to-ports ${redir_port}
+
+  ${iptables} -t nat -A BOX_EXTERNAL -p tcp -i lo -j REDIRECT --to-ports "${redir_port}"
+  if [ "${#ap_list[@]}" -ne 0 ]; then
+    for ap in "${ap_list[@]}" ; do
+      ${iptables} -t nat -A BOX_EXTERNAL -p tcp -i "${ap}" -j REDIRECT --to-ports "${redir_port}"
     done
-    log Info "${ap_list[*]} 透明代理已启用."
+    log Info "外部接口: [${ap_list[*]}] NAT REDIRECT 已就绪."
   fi
-  
+
   ${iptables} -t nat -I PREROUTING -j BOX_EXTERNAL
-  
-  ${iptables} -t nat -I BOX_LOCAL 1 -m owner --uid-owner ${box_user} --gid-owner ${box_group} -j RETURN
-  
-  if [ "${ignore_out_list}" != "" ] ; then
-    for ignore in ${ignore_out_list[@]} ; do
-      ${iptables} -t nat -A BOX_LOCAL -o ${ignore} -j RETURN
+
+  ${iptables} -t nat -N BOX_LOCAL
+  ${iptables} -t nat -F BOX_LOCAL
+
+  if [ "${#ignore_out_list[@]}" -ne 0 ]; then
+    for ignore in "${ignore_out_list[@]}" ; do
+      ${iptables} -t nat -A BOX_LOCAL -o "${ignore}" -j RETURN
     done
-    log Info "${ignore_out_list[*]} 不走透明代理."
+    log Info "接口豁免: [${ignore_out_list[*]}] 已绕过."
   fi
-  
-  if [ "${proxy_mode}" = "blacklist" ] ; then
+
+  for subnet in "${intranet[@]}" ; do
+    ${iptables} -t nat -A BOX_LOCAL -d "${subnet}" -j RETURN
+  done
+  ${iptables} -t nat -A BOX_LOCAL -j LOCAL_IP_V4
+
+  if [ "${proxy_mode}" = "blacklist" ]; then
+    if [ "${#gid_list[@]}" -ne 0 ]; then
+      for gid in "${gid_list[@]}" ; do
+        ${iptables} -t nat -A BOX_LOCAL -m owner --gid-owner "${gid}" -j RETURN
+      done
+      log Info "权限过滤: 已绕过 GID [${gid_list[*]}]."
+    fi
+
     if [ "${#uid_list[@]}" -eq 0 ]; then
-      # Global 模式
-      ${iptables} -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports ${redir_port}
-      log Info "透明代理将应用至全局所有应用(IPv4)."
-      log Info "所有应用的透明代理已启用(IPv4)."
+      ${iptables} -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports "${redir_port}"
+      log Info "代理模式: [全局模式] 已接管所有应用流量."
     else
-      ${iptables} -t nat -N BOX_BYPASS
+      ${iptables} -t nat -N BOX_BYPASS 2>/dev/null
       ${iptables} -t nat -F BOX_BYPASS
-      
-      for appid in ${uid_list[@]} ; do
-        ${iptables} -t nat -A BOX_BYPASS -m owner --uid-owner ${appid} -j RETURN
+      for appid in "${uid_list[@]}" ; do
+        ${iptables} -t nat -A BOX_BYPASS -m owner --uid-owner "${appid}" -j ACCEPT
       done
-      
-      ${iptables} -t nat -I BOX_LOCAL 2 -j BOX_BYPASS 
-      
-      ${iptables} -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports ${redir_port}
-      log Info "代理模式: ${proxy_mode}, ${user_packages_list[*]} 未启用透明代理."
+      ${iptables} -t nat -A BOX_LOCAL -j BOX_BYPASS
+      ${iptables} -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports "${redir_port}"
+      log Info "代理模式: [黑名单] 已接管指定范围外的应用."
     fi
-    
-    if [ "${#gid_list[@]}" -ne 0 ]; then
-      for gid in ${gid_list[@]} ; do
-        ${iptables} -t nat -A BOX_LOCAL -m owner --gid-owner ${gid} -j RETURN
-      done
-      log Info "代理模式: ${proxy_mode}, GID ${gid_list[*]} 未启用透明代理."
-    fi
-    
-  elif [ "${proxy_mode}" = "whitelist" ] ; then
+  elif [ "${proxy_mode}" = "whitelist" ]; then
     if [ "${#uid_list[@]}" -ne 0 ]; then
-      for appid in ${uid_list[@]} ; do
-        ${iptables} -t nat -A BOX_LOCAL -p tcp -m owner --uid-owner ${appid} -j REDIRECT --to-ports ${redir_port}
-        ${iptables} -t nat -A BOX_LOCAL -p udp -m owner --uid-owner ${appid} -j REDIRECT --to-ports ${redir_port}
+      for appid in "${uid_list[@]}" ; do
+        ${iptables} -t nat -A BOX_LOCAL -p tcp -m owner --uid-owner "${appid}" -j REDIRECT --to-ports "${redir_port}"
       done
-      ${iptables} -t nat -A BOX_LOCAL -p tcp -m owner --uid-owner 0 -j REDIRECT --to-ports ${redir_port}
-      ${iptables} -t nat -A BOX_LOCAL -p tcp -m owner --uid-owner 1052 -j REDIRECT --to-ports ${redir_port}
-      log Info "代理模式: ${proxy_mode}, ${user_packages_list[*]} 透明代理已启用."
+      log Info "代理模式: [白名单] 已接管指定范围内的应用."
     fi
     if [ "${#gid_list[@]}" -ne 0 ]; then
-      for gid in ${gid_list[@]} ; do
-        ${iptables} -t nat -A BOX_LOCAL -p tcp -m owner --gid-owner ${gid} -j REDIRECT --to-ports ${redir_port}
+      for gid in "${gid_list[@]}" ; do
+        ${iptables} -t nat -A BOX_LOCAL -p tcp -m owner --gid-owner "${gid}" -j REDIRECT --to-ports "${redir_port}"
       done
-      log Info "代理模式: ${proxy_mode}, GID ${gid_list[*]} 透明代理已启用."
+      log Info "权限过滤: 已接管 GID [${gid_list[*]}]."
     fi
   else
-    log Warn "代理模式: ${proxy_mode} 错误，默认应用至全局"
-    ${iptables} -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports ${redir_port}
-    log Info "透明代理将应用至全局所有应用(IPv4)."
-    log Info "所有应用的透明代理已启用(IPv4)."
+    ${iptables} -t nat -A BOX_LOCAL -p tcp -j REDIRECT --to-ports "${redir_port}"
   fi
-  
-  ip6tables -A OUTPUT -p udp --dport 53 -j DROP
-  ip6tables -A OUTPUT -p tcp --dport 853 -j DROP
+
+  if [ -n "${box_user}" ]; then
+    ${iptables} -t nat -I BOX_LOCAL 1 -m owner --uid-owner "${box_user}" --gid-owner "${box_group}" -j RETURN
+  fi
+
   ${iptables} -t nat -I OUTPUT -j BOX_LOCAL
-  ${iptables} -A OUTPUT -d 127.0.0.1 -p tcp -m owner --uid-owner ${box_user} --gid-owner ${box_group} -m tcp --dport ${redir_port} -j REJECT
+
+  ${iptables} -N BOX_INPUT_FILTER 2>/dev/null
+  ${iptables} -F BOX_INPUT_FILTER
+  ${iptables} -A BOX_INPUT_FILTER -i lo -j RETURN
+  ${iptables} -A BOX_INPUT_FILTER -p icmp -j RETURN
+  ${iptables} -A BOX_INPUT_FILTER -d 127.0.0.1 -j DROP
+  ${iptables} -I INPUT -j BOX_INPUT_FILTER
+
+  if { [ "${mihomo_dns_forward}" = "true" ] && [ "${bin_name}" = "mihomo" ]; } || [ "${bin_name}" = "clash" ]; then
+    ${iptables} -t nat -N CLASH_DNS_EXTERNAL
+    ${iptables} -t nat -F CLASH_DNS_EXTERNAL
+    ${iptables} -t nat -A CLASH_DNS_EXTERNAL -p udp --dport 53 -j REDIRECT --to-ports "${clash_dns_port}"
+    ${iptables} -t nat -I PREROUTING -j CLASH_DNS_EXTERNAL
+
+    ${iptables} -t nat -N CLASH_DNS_LOCAL
+    ${iptables} -t nat -F CLASH_DNS_LOCAL
+    if [ -n "${box_user}" ]; then
+      ${iptables} -t nat -I CLASH_DNS_LOCAL 1 -m owner --uid-owner "${box_user}" --gid-owner "${box_group}" -j RETURN
+    fi
+    ${iptables} -t nat -A CLASH_DNS_LOCAL -p udp --dport 53 -j REDIRECT --to-ports "${clash_dns_port}"
+    ${iptables} -t nat -I OUTPUT -j CLASH_DNS_LOCAL
+
+    log Info "DNS 策略: 全局劫持转发已挂载至 NAT 链."
+  fi
+
+  ${iptables} -t nat -A OUTPUT -d "${fake_ip_range_v4}" -p icmp -j DNAT --to-destination 127.0.0.1
+  ${iptables} -t nat -A PREROUTING -d "${fake_ip_range_v4}" -p icmp -j DNAT --to-destination 127.0.0.1
+  log Info "IPv4 NAT 防火墙规则部署完成."
 }
 
 stop_redirect() {
-  ${iptables} -t nat -D PREROUTING -j BOX_EXTERNAL
+  {
+    ${iptables} -D INPUT -j BOX_INPUT_FILTER
+    ${iptables} -F BOX_INPUT_FILTER
+    ${iptables} -X BOX_INPUT_FILTER
 
-  ${iptables} -t nat -D OUTPUT -j BOX_LOCAL
+    ${iptables} -t nat -D PREROUTING -j BOX_EXTERNAL
+    ${iptables} -t nat -D OUTPUT -j BOX_LOCAL
+    ${iptables} -t nat -D BOX_LOCAL -j BOX_BYPASS
 
-  ${iptables} -D OUTPUT -d 127.0.0.1 -p tcp -m owner --uid-owner ${box_user} --gid-owner ${box_group} -m tcp --dport ${redir_port} -j REJECT
-  ${iptables} -D OUTPUT -d 127.0.0.1 -p tcp -m owner --uid-owner 0 --gid-owner 3005 -m tcp --dport ${redir_port} -j REJECT
-  
-  ip6tables -D OUTPUT -p udp --dport 53 -j DROP
-  ip6tables -D OUTPUT -p tcp --dport 853 -j DROP
-  
-  ${iptables} -t nat -D BOX_LOCAL -j BOX_BYPASS
-  ${iptables} -t nat -F BOX_BYPASS
-  ${iptables} -t nat -X BOX_BYPASS
-  
-  ${iptables} -t nat -F BOX_EXTERNAL
-  ${iptables} -t nat -X BOX_EXTERNAL
-  ${iptables} -t nat -F BOX_LOCAL
-  ${iptables} -t nat -X BOX_LOCAL
-  ${iptables} -t nat -F LOCAL_IP_V4
-  ${iptables} -t nat -X LOCAL_IP_V4
+    for table in nat mangle; do
+      ${iptables} -t $table -D PREROUTING -j CLASH_DNS_EXTERNAL
+      ${iptables} -t $table -D OUTPUT -j CLASH_DNS_LOCAL
+      ${iptables} -t $table -F CLASH_DNS_EXTERNAL
+      ${iptables} -t $table -X CLASH_DNS_EXTERNAL
+      ${iptables} -t $table -F CLASH_DNS_LOCAL
+      ${iptables} -t $table -X CLASH_DNS_LOCAL
+    done
+
+    for chain in BOX_BYPASS BOX_EXTERNAL BOX_LOCAL LOCAL_IP_V4; do
+      ${iptables} -t nat -F "$chain"
+      ${iptables} -t nat -X "$chain"
+    done
+
+    ${iptables} -t nat -D OUTPUT -d "${fake_ip_range_v4}" -p icmp -j DNAT --to-destination 127.0.0.1
+    ${iptables} -t nat -D PREROUTING -d "${fake_ip_range_v4}" -p icmp -j DNAT --to-destination 127.0.0.1
+  } >/dev/null 2>&1
 }
 
 start_tproxy() {
-  if [ "${iptables}" = "ip6tables -w 100" ] ; then
-    ip -6 rule add fwmark ${mark_id} table ${table_id} pref ${table_id}
-    ip -6 route add local default dev lo table ${table_id}
-  else
-    ip rule add fwmark ${mark_id} table ${table_id} pref ${table_id}
-    ip route add local default dev lo table ${table_id}
+  use_nat_table=true
+  if [ "${iptables}" = "${SYS_IP6TABLES} -w 100" ]; then
+      use_nat_table=false
   fi
-  
+
+  if [ "$use_nat_table" = "true" ]; then
+    log Info "正在注入: IPv4 TPROXY 防火墙规则."
+  else
+    log Info "正在注入: IPv6 TPROXY 防火墙规则."
+  fi
+
+  if [ "${iptables}" = "${SYS_IP6TABLES} -w 100" ]; then
+    ${SYS_IP} -6 rule add fwmark "${mark_id}" table "${table_id}" pref "${table_id}"
+    ${SYS_IP} -6 route add local default dev lo table "${table_id}"
+  else
+    ${SYS_IP} rule add fwmark "${mark_id}" table "${table_id}" pref "${table_id}"
+    ${SYS_IP} route add local default dev lo table "${table_id}"
+  fi
+
   ${iptables} -t mangle -N BOX_EXTERNAL
   ${iptables} -t mangle -F BOX_EXTERNAL
-  
-  ${iptables} -t mangle -A BOX_EXTERNAL -p tcp -m socket --transparent -j MARK --set-xmark ${mark_id}
-  ${iptables} -t mangle -A BOX_EXTERNAL -p udp -m socket --transparent -j MARK --set-xmark ${mark_id}
+
+  ${iptables} -t mangle -A BOX_EXTERNAL -p tcp -m socket --transparent -j MARK --set-xmark "${mark_id}"
+  ${iptables} -t mangle -A BOX_EXTERNAL -p udp -m socket --transparent -j MARK --set-xmark "${mark_id}"
+
   ${iptables} -t mangle -A BOX_EXTERNAL -m socket -j RETURN
-  
-  if [ "${mihomo_dns_forward}" = "true" ] && [ "${bin_name}" = "mihomo" ] || [ "${bin_name}" = "hysteria" ] || [ "${bin_name}" = "clash" ] ; then
-    ${iptables} -t mangle -A BOX_EXTERNAL -p tcp --dport 53 -j RETURN
-    ${iptables} -t mangle -A BOX_EXTERNAL -p udp --dport 53 -j RETURN
-  else
-    ${iptables} -t mangle -A BOX_EXTERNAL -p tcp --dport 53 -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${mark_id}
-    ${iptables} -t mangle -A BOX_EXTERNAL -p udp --dport 53 -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${mark_id}
-  fi
-  
-  if [ "${iptables}" = "ip6tables -w 100" ] ; then
-    for subnet6 in ${intranet6[@]} ; do
-      ${iptables} -t mangle -A BOX_EXTERNAL -d ${subnet6} -j RETURN
+
+  if [ "${iptables}" = "${SYS_IP6TABLES} -w 100" ]; then
+    ${iptables} -t mangle -A BOX_EXTERNAL -s fe80::/10 -j RETURN
+    for subnet6 in "${intranet6[@]}" ; do
+      ${iptables} -t mangle -A BOX_EXTERNAL -d "${subnet6}" -p udp ! --dport 53 -j RETURN
+      ${iptables} -t mangle -A BOX_EXTERNAL -d "${subnet6}" ! -p udp -j RETURN
     done
     ${iptables} -t mangle -N LOCAL_IP_V6
     ${iptables} -t mangle -F LOCAL_IP_V6
     ${iptables} -t mangle -A BOX_EXTERNAL -j LOCAL_IP_V6
   else
-    for subnet in ${intranet[@]} ; do
-      ${iptables} -t mangle -A BOX_EXTERNAL -d ${subnet} -j RETURN
+    for subnet in "${intranet[@]}" ; do
+      ${iptables} -t mangle -A BOX_EXTERNAL -d "${subnet}" -j RETURN
     done
     ${iptables} -t mangle -N LOCAL_IP_V4
     ${iptables} -t mangle -F LOCAL_IP_V4
     ${iptables} -t mangle -A BOX_EXTERNAL -j LOCAL_IP_V4
   fi
-  
-  ${iptables} -t mangle -A BOX_EXTERNAL -p tcp -i lo -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${mark_id}
-  ${iptables} -t mangle -A BOX_EXTERNAL -p udp -i lo -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${mark_id}
-  
-  if [ "${ap_list}" != "" ] ; then
-    for ap in ${ap_list[@]} ; do
-      ${iptables} -t mangle -A BOX_EXTERNAL -p tcp -i ${ap} -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${mark_id}
-      ${iptables} -t mangle -A BOX_EXTERNAL -p udp -i ${ap} -j TPROXY --on-port ${tproxy_port} --tproxy-mark ${mark_id}
+
+  ${iptables} -t mangle -A BOX_EXTERNAL -p tcp -i lo -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${mark_id}"
+  ${iptables} -t mangle -A BOX_EXTERNAL -p udp -i lo -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${mark_id}"
+
+  if [ "${#ap_list[@]}" -ne 0 ]; then
+    for ap in "${ap_list[@]}" ; do
+      ${iptables} -t mangle -A BOX_EXTERNAL -p tcp -i "${ap}" -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${mark_id}"
+      ${iptables} -t mangle -A BOX_EXTERNAL -p udp -i "${ap}" -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${mark_id}"
     done
-    log Info "${ap_list[*]} 透明代理已启用."
+    [ "${iptables}" = "${SYS_IPTABLES} -w 100" ] && log Info "外部接口: [${ap_list[*]}] TPROXY 劫持已就绪."
   fi
-  
+
   ${iptables} -t mangle -I PREROUTING -j BOX_EXTERNAL
-  
+
   ${iptables} -t mangle -N BOX_LOCAL
   ${iptables} -t mangle -F BOX_LOCAL
-  
-  ${iptables} -t mangle -A BOX_LOCAL -m owner --uid-owner ${box_user} --gid-owner ${box_group} -j RETURN
-  
-  if [ "${ignore_out_list}" != "" ] ; then
-    for ignore in ${ignore_out_list[@]} ; do
-      ${iptables} -t mangle -A BOX_LOCAL -o ${ignore} -j RETURN
+
+  if [ "${#ignore_out_list[@]}" -ne 0 ]; then
+    for ignore in "${ignore_out_list[@]}" ; do
+      ${iptables} -t mangle -A BOX_LOCAL -o "${ignore}" -j RETURN
     done
-    log Info "${ignore_out_list[*]} 忽略透明代理."
+    [ "${iptables}" = "${SYS_IPTABLES} -w 100" ] && log Info "接口豁免: [${ignore_out_list[*]}] 已绕过."
   fi
-  
-  if [ "${mihomo_dns_forward}" = "true" ] && [ "${bin_name}" = "mihomo" ] || [ "${bin_name}" = "hysteria" ] || [ "${bin_name}" = "clash" ] ; then
-    ${iptables} -t mangle -A BOX_LOCAL -p tcp --dport 53 -j RETURN
-    ${iptables} -t mangle -A BOX_LOCAL -p udp --dport 53 -j RETURN
-  else
-    ${iptables} -t mangle -A BOX_LOCAL -p tcp --dport 53 -j MARK --set-xmark ${mark_id}
-    ${iptables} -t mangle -A BOX_LOCAL -p udp --dport 53 -j MARK --set-xmark ${mark_id}
-  fi
-  
-  if [ "${iptables}" = "ip6tables -w 100" ] ; then
-    for subnet6 in ${intranet6[@]} ; do
-      ${iptables} -t mangle -A BOX_LOCAL -d ${subnet6} -j RETURN
+
+  if [ "${iptables}" = "${SYS_IP6TABLES} -w 100" ]; then
+    ${iptables} -t mangle -A BOX_LOCAL -s fe80::/10 -j RETURN
+    for subnet6 in "${intranet6[@]}" ; do
+      ${iptables} -t mangle -A BOX_LOCAL -d "${subnet6}" -p udp ! --dport 53 -j RETURN
+      ${iptables} -t mangle -A BOX_LOCAL -d "${subnet6}" ! -p udp -j RETURN
     done
     ${iptables} -t mangle -A BOX_LOCAL -j LOCAL_IP_V6
   else
-    for subnet in ${intranet[@]} ; do
-      ${iptables} -t mangle -A BOX_LOCAL -d ${subnet} -j RETURN
+    for subnet in "${intranet[@]}" ; do
+      ${iptables} -t mangle -A BOX_LOCAL -d "${subnet}" -j RETURN
     done
     ${iptables} -t mangle -A BOX_LOCAL -j LOCAL_IP_V4
   fi
-  
-  if [ "${proxy_mode}" = "blacklist" ] ; then
-    if [ "${uid_list}" = "" ] ; then
-      ${iptables} -t mangle -A BOX_LOCAL -p tcp -j MARK --set-xmark ${mark_id}
-      ${iptables} -t mangle -A BOX_LOCAL -p udp -j MARK --set-xmark ${mark_id}
-      log Info "透明代理已启用 (全局模式)."
+
+  if [ "${proxy_mode}" = "blacklist" ]; then
+    if [ "${#gid_list[@]}" -ne 0 ]; then
+      for gid in "${gid_list[@]}" ; do
+        ${iptables} -t mangle -A BOX_LOCAL -m owner --gid-owner "${gid}" -j RETURN
+      done
+      [ "${iptables}" = "${SYS_IPTABLES} -w 100" ] && log Info "权限过滤: 已绕过 GID [${gid_list[*]}]."
+    fi
+    if [ "${#uid_list[@]}" -eq 0 ]; then
+      ${iptables} -t mangle -A BOX_LOCAL -p tcp -j MARK --set-xmark "${mark_id}"
+      ${iptables} -t mangle -A BOX_LOCAL -p udp -j MARK --set-xmark "${mark_id}"
+      [ "${iptables}" = "${SYS_IPTABLES} -w 100" ] && log Info "代理模式: [全局模式] 已接管所有应用流量."
     else
       ${iptables} -t mangle -N BOX_BYPASS
       ${iptables} -t mangle -F BOX_BYPASS
-      
-      for appid in ${uid_list[@]} ; do
-        ${iptables} -t mangle -A BOX_BYPASS -m owner --uid-owner ${appid} -j ACCEPT
+      for appid in "${uid_list[@]}" ; do
+        ${iptables} -t mangle -A BOX_BYPASS -m owner --uid-owner "${appid}" -j ACCEPT
       done
-      
-      ${iptables} -t mangle -I BOX_LOCAL 1 -j BOX_BYPASS
-      
-      if [ "${iptables}" = "iptables -w 100" ]; then
-         ${iptables} -t nat -N BOX_BYPASS
-         ${iptables} -t nat -F BOX_BYPASS
-         for appid in ${uid_list[@]} ; do
-           ${iptables} -t nat -A BOX_BYPASS -m owner --uid-owner ${appid} -j RETURN
-         done
-         ${iptables} -t nat -I OUTPUT 1 -j BOX_BYPASS
-      fi
-      
-      ${iptables} -t mangle -A BOX_LOCAL -p tcp -j MARK --set-xmark ${mark_id}
-      ${iptables} -t mangle -A BOX_LOCAL -p udp -j MARK --set-xmark ${mark_id}
-      log Info "代理模式: Blacklist, 已绕过指定应用."
+      ${iptables} -t mangle -A BOX_LOCAL -j BOX_BYPASS
+      ${iptables} -t mangle -A BOX_LOCAL -p tcp -j MARK --set-xmark "${mark_id}"
+      ${iptables} -t mangle -A BOX_LOCAL -p udp -j MARK --set-xmark "${mark_id}"
+      [ "${iptables}" = "${SYS_IPTABLES} -w 100" ] && log Info "代理模式: [黑名单] 已接管指定范围外的应用."
     fi
-    
-    if [ "${gid_list}" != "" ] ; then
-      for gid in ${gid_list[@]} ; do
-        ${iptables} -t mangle -A BOX_LOCAL -m owner --gid-owner ${gid} -j RETURN
+  elif [ "${proxy_mode}" = "whitelist" ]; then
+    if [ "${#uid_list[@]}" -ne 0 ]; then
+      for appid in "${uid_list[@]}" ; do
+        ${iptables} -t mangle -A BOX_LOCAL -p tcp -m owner --uid-owner "${appid}" -j MARK --set-xmark "${mark_id}"
+        ${iptables} -t mangle -A BOX_LOCAL -p udp -m owner --uid-owner "${appid}" -j MARK --set-xmark "${mark_id}"
       done
-      log Info "已绕过 GID: ${gid_list[*]}."
+      [ "${iptables}" = "${SYS_IPTABLES} -w 100" ] && log Info "代理模式: [白名单] 已接管指定范围内的应用."
     fi
-    
-  elif [ "${proxy_mode}" = "whitelist" ] ; then
-    if [ "${uid_list}" != "" ] ; then
-      for appid in ${uid_list[@]} ; do
-        ${iptables} -t mangle -A BOX_LOCAL -p tcp -m owner --uid-owner ${appid} -j MARK --set-xmark ${mark_id}
-        ${iptables} -t mangle -A BOX_LOCAL -p udp -m owner --uid-owner ${appid} -j MARK --set-xmark ${mark_id}
+    if [ "${#gid_list[@]}" -ne 0 ]; then
+      for gid in "${gid_list[@]}" ; do
+        ${iptables} -t mangle -A BOX_LOCAL -p tcp -m owner --gid-owner "${gid}" -j MARK --set-xmark "${mark_id}"
+        ${iptables} -t mangle -A BOX_LOCAL -p udp -m owner --gid-owner "${gid}" -j MARK --set-xmark "${mark_id}"
       done
-      ${iptables} -t mangle -A BOX_LOCAL -p tcp -m owner --uid-owner 0 -j MARK --set-xmark ${mark_id}
-      ${iptables} -t mangle -A BOX_LOCAL -p udp -m owner --uid-owner 0 -j MARK --set-xmark ${mark_id}
-      ${iptables} -t mangle -A BOX_LOCAL -p tcp -m owner --uid-owner 1052 -j MARK --set-xmark ${mark_id}
-      ${iptables} -t mangle -A BOX_LOCAL -p udp -m owner --uid-owner 1052 -j MARK --set-xmark ${mark_id}
-      log Info "代理模式: Whitelist, 指定应用已启用."
+      [ "${iptables}" = "${SYS_IPTABLES} -w 100" ] && log Info "权限过滤: 已接管 GID [${gid_list[*]}]."
     fi
-    if [ "${gid_list}" != "" ] ; then
-      for gid in ${gid_list[@]} ; do
-        ${iptables} -t mangle -A BOX_LOCAL -p tcp -m owner --gid-owner ${gid} -j MARK --set-xmark ${mark_id}
-        ${iptables} -t mangle -A BOX_LOCAL -p udp -m owner --gid-owner ${gid} -j MARK --set-xmark ${mark_id}
-      done
-      log Info "已代理 GID: ${gid_list[*]}."
-    fi
-  else
-    log Warn "代理模式错误或未定义，默认全局代理."
-    ${iptables} -t mangle -A BOX_LOCAL -p tcp -j MARK --set-xmark ${mark_id}
-    ${iptables} -t mangle -A BOX_LOCAL -p udp -j MARK --set-xmark ${mark_id}
   fi
-  
-  ${iptables} -t mangle -I BOX_LOCAL 1 -j CONNMARK --restore-mark
-  ${iptables} -t mangle -I BOX_LOCAL 2 -m mark --mark ${mark_id} -j ACCEPT
-  
+
+  if [ -n "${box_user}" ]; then
+    ${iptables} -t mangle -I BOX_LOCAL 1 -m owner --uid-owner "${box_user}" --gid-owner "${box_group}" -j RETURN
+  fi
+
+  ${iptables} -t mangle -I BOX_LOCAL 2 -j CONNMARK --restore-mark
+  ${iptables} -t mangle -I BOX_LOCAL 3 -m mark --mark "${mark_id}" -j ACCEPT
+
+  if [ "$use_nat_table" = "true" ]; then
+    ${iptables} -t mangle -I BOX_LOCAL 4 -p udp --dport 53 -j RETURN
+    ${iptables} -t mangle -I BOX_LOCAL 5 -p tcp --dport 53 -j RETURN
+
+    ${iptables} -t mangle -I BOX_EXTERNAL 1 -p udp --dport 53 -j RETURN
+    ${iptables} -t mangle -I BOX_EXTERNAL 2 -p tcp --dport 53 -j RETURN
+  fi
+
   ${iptables} -t mangle -A BOX_LOCAL -j CONNMARK --save-mark
-  
   ${iptables} -t mangle -I OUTPUT -j BOX_LOCAL
-  
+
+  local localhost="127.0.0.1"
+  local icmp_p="icmp"
+  [ "${iptables}" = "${SYS_IP6TABLES} -w 100" ] && localhost="::1" && icmp_p="ipv6-icmp"
+  ${iptables} -N BOX_INPUT_FILTER
+  ${iptables} -F BOX_INPUT_FILTER
+  ${iptables} -A BOX_INPUT_FILTER -i lo -j RETURN
+  ${iptables} -A BOX_INPUT_FILTER -p "${icmp_p}" -j RETURN
+  ${iptables} -A BOX_INPUT_FILTER -d "${localhost}" -j DROP
+  ${iptables} -I INPUT -j BOX_INPUT_FILTER
+
+  if { [ "${mihomo_dns_forward}" = "true" ] && [ "${bin_name}" = "mihomo" ]; } || [ "${bin_name}" = "clash" ]; then
+      if [ "$use_nat_table" = "true" ]; then
+          ${iptables} -t nat -N CLASH_DNS_EXTERNAL
+          ${iptables} -t nat -F CLASH_DNS_EXTERNAL
+          ${iptables} -t nat -A CLASH_DNS_EXTERNAL -p udp --dport 53 -j REDIRECT --to-ports "${clash_dns_port}"
+          ${iptables} -t nat -I PREROUTING -j CLASH_DNS_EXTERNAL
+
+          ${iptables} -t nat -N CLASH_DNS_LOCAL
+          ${iptables} -t nat -F CLASH_DNS_LOCAL
+
+          if [ -n "${box_user}" ]; then
+            ${iptables} -t nat -I CLASH_DNS_LOCAL 1 -m owner --uid-owner "${box_user}" --gid-owner "${box_group}" -j RETURN
+          fi
+
+          ${iptables} -t nat -A CLASH_DNS_LOCAL -p udp --dport 53 -j REDIRECT --to-ports "${clash_dns_port}"
+          ${iptables} -t nat -I OUTPUT -j CLASH_DNS_LOCAL
+          [ "${iptables}" = "${SYS_IPTABLES} -w 100" ] && log Info "DNS 策略: [IPv4] 全局 UDP/53 劫持转发 (NAT) 已挂载."
+      else
+          ${iptables} -t mangle -N CLASH_DNS_EXTERNAL
+          ${iptables} -t mangle -F CLASH_DNS_EXTERNAL
+
+          ${iptables} -t mangle -A CLASH_DNS_EXTERNAL -p udp --dport 53 -j TPROXY --on-port "${tproxy_port}" --tproxy-mark "${mark_id}"
+          ${iptables} -t mangle -I PREROUTING -j CLASH_DNS_EXTERNAL
+
+          ${iptables} -t mangle -N CLASH_DNS_LOCAL
+          ${iptables} -t mangle -F CLASH_DNS_LOCAL
+
+          if [ -n "${box_user}" ]; then
+            ${iptables} -t mangle -I CLASH_DNS_LOCAL 1 -m owner --uid-owner "${box_user}" --gid-owner "${box_group}" -j RETURN
+          fi
+
+          ${iptables} -t mangle -A CLASH_DNS_LOCAL -p udp --dport 53 -j MARK --set-xmark "${mark_id}"
+          ${iptables} -t mangle -I OUTPUT -j CLASH_DNS_LOCAL
+          [ "${iptables}" = "${SYS_IP6TABLES} -w 100" ] && log Info "DNS 策略: [IPv6] 全局 UDP/53 透明劫持 (Mangle) 已挂载."
+      fi
+  fi
+
   ${iptables} -t mangle -N DIVERT
   ${iptables} -t mangle -F DIVERT
-  ${iptables} -t mangle -A DIVERT -j MARK --set-xmark ${mark_id}
+  ${iptables} -t mangle -A DIVERT -j MARK --set-xmark "${mark_id}"
   ${iptables} -t mangle -A DIVERT -j ACCEPT
   ${iptables} -t mangle -I PREROUTING -p tcp -m socket -j DIVERT
-  
-  if [ "${iptables}" = "ip6tables -w 100" ] ; then
-    ${iptables} -A OUTPUT -d ::1 -p tcp -m owner --uid-owner ${box_user} --gid-owner ${box_group} -m tcp --dport ${tproxy_port} -j REJECT
-  else
-    ${iptables} -A OUTPUT -d 127.0.0.1 -p tcp -m owner --uid-owner ${box_user} --gid-owner ${box_group} -m tcp --dport ${tproxy_port} -j REJECT
-  fi
-  
-  if [ "${mihomo_dns_forward}" = "true" ] && [ "${bin_name}" = "mihomo" ] || [ "${bin_name}" = "clash" ] ; then
-    if [ "${iptables}" = "iptables -w 100" ] ; then
-      ${iptables} -t nat -N CLASH_DNS_EXTERNAL
-      ${iptables} -t nat -F CLASH_DNS_EXTERNAL
-      ${iptables} -t nat -A CLASH_DNS_EXTERNAL -p udp --dport 53 -j REDIRECT --to-ports ${clash_dns_port}
-      ${iptables} -t nat -I PREROUTING -j CLASH_DNS_EXTERNAL
+  [ "${iptables}" = "${SYS_IPTABLES} -w 100" ] && log Info "Mangle 链及 DIVERT 策略部署完成."
 
-      ${iptables} -t nat -N CLASH_DNS_LOCAL
-      ${iptables} -t nat -F CLASH_DNS_LOCAL
-      ${iptables} -t nat -A CLASH_DNS_LOCAL -m owner --uid-owner ${box_user} --gid-owner ${box_group} -j RETURN
-      ${iptables} -t nat -A CLASH_DNS_LOCAL -p udp --dport 53 -j REDIRECT --to-ports ${clash_dns_port}
-      ${iptables} -t nat -I OUTPUT -j CLASH_DNS_LOCAL
-    fi
+  if [ "${iptables}" = "${SYS_IPTABLES} -w 100" ]; then
+    ${SYS_IPTABLES} -w 100 -t nat -A OUTPUT -d "${fake_ip_range_v4}" -p icmp -j DNAT --to-destination 127.0.0.1
+    ${SYS_IPTABLES} -w 100 -t nat -A PREROUTING -d "${fake_ip_range_v4}" -p icmp -j DNAT --to-destination 127.0.0.1
   fi
-  
-  ip6tables -A OUTPUT -p udp --dport 53 -j DROP
-  ip6tables -A OUTPUT -p tcp --dport 853 -j DROP
-  
-  iptables -w 100 -t nat -A OUTPUT -d ${fake_ip_range_v4} -p icmp -j DNAT --to-destination 127.0.0.1
-  iptables -w 100 -t nat -A PREROUTING -d ${fake_ip_range_v4} -p icmp -j DNAT --to-destination 127.0.0.1
 }
 
 stop_tproxy() {
-  if [ "${iptables}" = "ip6tables -w 100" ] ; then
-    ip -6 rule del fwmark ${mark_id} table ${table_id} pref ${table_id}
-    ip -6 route del local default dev lo table ${table_id}
-  else
-    ip rule del fwmark ${mark_id} table ${table_id} pref ${table_id}
-    ip route del local default dev lo table ${table_id}
-  fi
-  
-  ${iptables} -t mangle -D PREROUTING -j BOX_EXTERNAL
-  
-  ${iptables} -t mangle -D OUTPUT -j BOX_LOCAL
-  
-  ${iptables} -t mangle -D PREROUTING -p tcp -m socket -j DIVERT
+  {
+    ${iptables} -D INPUT -j BOX_INPUT_FILTER
+    ${iptables} -F BOX_INPUT_FILTER
+    ${iptables} -X BOX_INPUT_FILTER
 
-  if [ "${iptables}" = "iptables -w 100" ] ; then
-    
-    ${iptables} -t nat -D PREROUTING -j CLASH_DNS_EXTERNAL
-    ${iptables} -t nat -D OUTPUT -j CLASH_DNS_LOCAL
-    
-    ${iptables} -t nat -D OUTPUT -d ${fake_ip_range_v4} -p icmp -j DNAT --to-destination 127.0.0.1
-    ${iptables} -t nat -D PREROUTING -d ${fake_ip_range_v4} -p icmp -j DNAT --to-destination 127.0.0.1
-  fi
-  
-  if [ "${iptables}" = "ip6tables -w 100" ] ; then
-    ip6tables -D OUTPUT -p udp --dport 53 -j DROP
-    ip6tables -D OUTPUT -p tcp --dport 853 -j DROP
-  fi
-  
-  if [ "${iptables}" = "ip6tables -w 100" ] ; then
-    ${iptables} -D OUTPUT -d ::1 -p tcp -m owner --uid-owner ${box_user} --gid-owner ${box_group} -m tcp --dport ${tproxy_port} -j REJECT
-  else
-    ${iptables} -D OUTPUT -d 127.0.0.1 -p tcp -m owner --uid-owner ${box_user} --gid-owner ${box_group} -m tcp --dport ${tproxy_port} -j REJECT
-  fi
-  
-  ${iptables} -t mangle -D BOX_LOCAL -j BOX_BYPASS
-  ${iptables} -t mangle -F BOX_BYPASS
-  ${iptables} -t mangle -X BOX_BYPASS
-  
-  if [ "${iptables}" = "iptables -w 100" ] ; then
-    ${iptables} -t nat -D OUTPUT -j BOX_BYPASS
-    ${iptables} -t nat -F BOX_BYPASS
-    ${iptables} -t nat -X BOX_BYPASS
-  fi
-  
-  ${iptables} -t mangle -F BOX_EXTERNAL
-  ${iptables} -t mangle -X BOX_EXTERNAL
-  ${iptables} -t mangle -F BOX_LOCAL
-  ${iptables} -t mangle -X BOX_LOCAL
-  ${iptables} -t mangle -F DIVERT
-  ${iptables} -t mangle -X DIVERT
-  
-  if [ "${iptables}" = "ip6tables -w 100" ] ; then
-    ${iptables} -t mangle -F LOCAL_IP_V6
-    ${iptables} -t mangle -X LOCAL_IP_V6
-  else
-    ${iptables} -t mangle -F LOCAL_IP_V4
-    ${iptables} -t mangle -X LOCAL_IP_V4
-  fi
-  
-  if [ "${iptables}" = "iptables -w 100" ] ; then
-    ${iptables} -t nat -F CLASH_DNS_EXTERNAL
-    ${iptables} -t nat -X CLASH_DNS_EXTERNAL
-    ${iptables} -t nat -F CLASH_DNS_LOCAL
-    ${iptables} -t nat -X CLASH_DNS_LOCAL
-  fi
+    if [ "${iptables}" = "${SYS_IP6TABLES} -w 100" ]; then
+      ${SYS_IP} -6 rule del fwmark "${mark_id}" table "${table_id}" pref "${table_id}"
+      ${SYS_IP} -6 route del local default dev lo table "${table_id}"
+    else
+      ${SYS_IP} rule del fwmark "${mark_id}" table "${table_id}" pref "${table_id}"
+      ${SYS_IP} route del local default dev lo table "${table_id}"
+    fi
+
+    ${iptables} -t mangle -D PREROUTING -j BOX_EXTERNAL
+    ${iptables} -t mangle -D OUTPUT -j BOX_LOCAL
+    ${iptables} -t mangle -D PREROUTING -p tcp -m socket -j DIVERT
+
+    for table in nat mangle; do
+      ${iptables} -t $table -D PREROUTING -j CLASH_DNS_EXTERNAL
+      ${iptables} -t $table -D OUTPUT -j CLASH_DNS_LOCAL
+      ${iptables} -t $table -F CLASH_DNS_EXTERNAL
+      ${iptables} -t $table -X CLASH_DNS_EXTERNAL
+      ${iptables} -t $table -F CLASH_DNS_LOCAL
+      ${iptables} -t $table -X CLASH_DNS_LOCAL
+    done
+
+    if [ "${iptables}" = "${SYS_IPTABLES} -w 100" ]; then
+      ${SYS_IPTABLES} -t nat -D OUTPUT -d "${fake_ip_range_v4}" -p icmp -j DNAT --to-destination 127.0.0.1
+      ${SYS_IPTABLES} -t nat -D PREROUTING -d "${fake_ip_range_v4}" -p icmp -j DNAT --to-destination 127.0.0.1
+    fi
+
+    ${iptables} -t mangle -D BOX_LOCAL -j BOX_BYPASS
+    ${iptables} -t mangle -F BOX_BYPASS
+    ${iptables} -t mangle -X BOX_BYPASS
+
+    ${iptables} -t mangle -F BOX_EXTERNAL
+    ${iptables} -t mangle -X BOX_EXTERNAL
+    ${iptables} -t mangle -F BOX_LOCAL
+    ${iptables} -t mangle -X BOX_LOCAL
+    ${iptables} -t mangle -F DIVERT
+    ${iptables} -t mangle -X DIVERT
+
+    if [ "${iptables}" = "${SYS_IP6TABLES} -w 100" ]; then
+      ${iptables} -t mangle -F LOCAL_IP_V6
+      ${iptables} -t mangle -X LOCAL_IP_V6
+    else
+      ${iptables} -t mangle -F LOCAL_IP_V4
+      ${iptables} -t mangle -X LOCAL_IP_V4
+    fi
+  } >/dev/null 2>&1
 }
 
 disable_ipv6() {
-  echo 0 > /proc/sys/net/ipv6/conf/all/accept_ra
-  echo 0 > /proc/sys/net/ipv6/conf/wlan0/accept_ra
-  echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6
-  echo 1 > /proc/sys/net/ipv6/conf/default/disable_ipv6
-  echo 1 > /proc/sys/net/ipv6/conf/wlan0/disable_ipv6
+  {
+    echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
+    echo 0 > /proc/sys/net/ipv6/conf/default/disable_ipv6
+
+    local pattern="^rmnet"
+    if [ -n "${ap_list[*]}" ]; then
+      for p in "${ap_list[@]}"; do
+        local clean_p=$(echo "$p" | tr -d '+')
+        pattern="${pattern}|^${clean_p}"
+      done
+    fi
+
+    for interface_dir in /proc/sys/net/ipv6/conf/*; do
+      local name="${interface_dir##*/}"
+      [ "$name" = "all" ] || [ "$name" = "default" ] || [ "$name" = "lo" ] || [ "$name" = "self" ] && continue
+
+      if echo "$name" | grep -qE "${pattern}"; then
+        if ip -6 addr show "$name" 2>/dev/null | grep -q "scope global"; then
+            ndc interface ipv6 "$name" disable
+            echo 1 > "${interface_dir}/disable_ipv6"
+            echo 0 > "${interface_dir}/accept_ra"
+        else
+            echo 0 > "${interface_dir}/disable_ipv6"
+            echo 2 > "${interface_dir}/accept_ra"
+        fi
+      fi
+    done
+  } >/dev/null 2>&1
 }
+
 enable_ipv6() {
-  echo 1 > /proc/sys/net/ipv6/conf/all/accept_ra
-  echo 1 > /proc/sys/net/ipv6/conf/wlan0/accept_ra
-  echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
-  echo 0 > /proc/sys/net/ipv6/conf/default/disable_ipv6
-  echo 0 > /proc/sys/net/ipv6/conf/wlan0/disable_ipv6
+  {
+    echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
+    echo 0 > /proc/sys/net/ipv6/conf/default/disable_ipv6
+    echo 2 > /proc/sys/net/ipv6/conf/all/accept_ra
+    echo 2 > /proc/sys/net/ipv6/conf/default/accept_ra
+
+    local pattern="^rmnet"
+    if [ -n "${ap_list[*]}" ]; then
+      for p in "${ap_list[@]}"; do
+        local clean_p=$(echo "$p" | tr -d '+')
+        pattern="${pattern}|^${clean_p}"
+      done
+    fi
+
+    for interface_dir in /proc/sys/net/ipv6/conf/*; do
+      local name="${interface_dir##*/}"
+      [ "$name" = "all" ] || [ "$name" = "default" ] || [ "$name" = "lo" ] || [ "$name" = "self" ] && continue
+
+      if echo "$name" | grep -qE "${pattern}"; then
+        ndc interface ipv6 "$name" disable
+
+        echo 0 > "${interface_dir}/disable_ipv6"
+        echo 2 > "${interface_dir}/accept_ra"
+        echo 2 > "${interface_dir}/router_solicitations"
+        echo 0 > "${interface_dir}/autoconf"
+        echo 1 > "${interface_dir}/autoconf"
+
+        ndc interface ipv6 "$name" enable
+      fi
+    done
+    ip -6 route flush cache
+  } >/dev/null 2>&1
 }
 
-if [ "${proxy_mode}" = "core" ] ; then
-  iptables="iptables -w 100" && stop_tproxy >> /dev/null 2>&1
-  iptables="ip6tables -w 100" && stop_tproxy >> /dev/null 2>&1
-  iptables="iptables -w 100" && stop_redirect >> /dev/null 2>&1
-  log Info "代理模式: ${proxy_mode}, 透明代理已禁用."
-  return 0
-fi
+wait_tun_device() {
+    local wait_count=0
+    local max_wait=5
+    while [ "${wait_count}" -lt "${max_wait}" ]; do
+        if ifconfig "${tun_device}" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+        wait_count=$((wait_count + 1))
+    done
+    return 1
+}
 
+tun_forward_ip_rules() {
+    ${SYS_IP} rule "$1" iif lo goto 6000 pref 5000
+    ${SYS_IP} rule "$1" iif "${tun_device}" lookup main suppress_prefixlength 0 pref 5010
+    ${SYS_IP} rule "$1" iif "${tun_device}" goto 6000 pref 5020
+    ${SYS_IP} rule "$1" from 10.0.0.0/8 lookup "${tun_table_index}" pref 5030
+    ${SYS_IP} rule "$1" from 172.16.0.0/12 lookup "${tun_table_index}" pref 5040
+    ${SYS_IP} rule "$1" from 192.168.0.0/16 lookup "${tun_table_index}" pref 5050
+    ${SYS_IP} rule "$1" nop pref 6000
+    ${SYS_IP} rule "$1" from all iif "${tun_device}" lookup main suppress_prefixlength 0 pref 8000
+    ${SYS_IP} rule "$1" lookup main pref 7000
+}
+
+tun_forward_ip_rules_del() {
+    {
+        ${SYS_IP} rule del pref 5000
+        ${SYS_IP} rule del pref 5010
+        ${SYS_IP} rule del pref 5020
+        ${SYS_IP} rule del pref 5030
+        ${SYS_IP} rule del pref 5040
+        ${SYS_IP} rule del pref 5050
+        ${SYS_IP} rule del pref 6000
+        ${SYS_IP} rule del pref 7000
+        ${SYS_IP} rule del pref 8000
+    } >/dev/null 2>&1
+}
+
+tun_forward_iptables_rules() {
+    ${SYS_IPTABLES} -w 100 "$1" FORWARD -o "${tun_device}" -j ACCEPT
+    ${SYS_IPTABLES} -w 100 "$1" FORWARD -i "${tun_device}" -j ACCEPT
+    ${SYS_IP6TABLES} -w 100 "$1" FORWARD -o "${tun_device}" -j ACCEPT
+    ${SYS_IP6TABLES} -w 100 "$1" FORWARD -i "${tun_device}" -j ACCEPT
+}
+
+tun_forward_enable() {
+    [ "${proxy_mode}" != "core" ] && [ "${proxy_method}" != "MIXED" ] && ! ifconfig "${tun_device}" >/dev/null 2>&1 && return 0
+
+    if ! ifconfig "${tun_device}" >/dev/null 2>&1; then
+        wait_tun_device || return 1
+    fi
+
+    tun_forward_disable
+    log Info "已开启虚拟网卡 [${tun_device}]，正在激活热点共享转发."
+    echo 1 > /proc/sys/net/ipv4/ip_forward
+    echo 2 > /proc/sys/net/ipv4/conf/default/rp_filter
+    echo 2 > /proc/sys/net/ipv4/conf/all/rp_filter
+
+    tun_forward_ip_rules "add"
+    tun_forward_iptables_rules "-I"
+    log Info "热点共享与网卡转发特性已准备就绪."
+    log Info "服务已启动完毕."
+}
+
+tun_forward_disable() {
+    {
+        tun_forward_ip_rules_del
+        tun_forward_iptables_rules "-D"
+    } >/dev/null 2>&1
+}
+
+destroy_all_rules() {
+  {
+    local target_chains="BOX_LOCAL BOX_EXTERNAL CLASH_DNS_LOCAL CLASH_DNS_EXTERNAL BOX_INPUT_FILTER"
+    for cmd in "${SYS_IPTABLES} -w 100" "${SYS_IP6TABLES} -w 100"; do
+        $cmd -D INPUT -j BOX_INPUT_FILTER 2>/dev/null
+        for table in mangle nat filter; do
+            [ "$table" = "filter" ] && t_arg="" || t_arg="-t $table"
+            for chain in $target_chains; do
+                while $cmd $t_arg -D $chain -j NET_BYPASS; do :; done
+            done
+            $cmd $t_arg -F NET_BYPASS
+            $cmd $t_arg -X NET_BYPASS
+        done
+    done
+    iptables="${SYS_IPTABLES} -w 100" && stop_tproxy
+    iptables="${SYS_IP6TABLES} -w 100" && stop_tproxy
+    iptables="${SYS_IPTABLES} -w 100" && stop_redirect
+
+    tun_forward_disable
+
+    echo 1 > /proc/sys/net/netfilter/nf_conntrack_flush
+  } >/dev/null 2>&1
+}
+ipv6_disabled_flag="/dev/tmp/ipv6_disabled"
 case "$1" in
   enable)
-    log Info "正在启动透明代理..."
-    iptables="iptables -w 100" && stop_tproxy >> /dev/null 2>&1
-    iptables="ip6tables -w 100" && stop_tproxy >> /dev/null 2>&1
-    iptables="iptables -w 100" && stop_redirect >> /dev/null 2>&1
+    pids=$(pgrep -f "$0 enable" | sort -n)
+    my_pid=$$
+    leader_pid=$(echo "$pids" | head -n 1)
+    if [ "$my_pid" -ne "$leader_pid" ]; then
+        log Warn "环境检查: 已有规则实例在运行，本次已自动挂起 (PID: $my_pid)."
+        exit 0
+    fi
+
+    log Info "iptables: 正在初始化 (PID: $my_pid)."
+    destroy_all_rules
+
     sleep 1
 
+    if [ "${ipv6}" = "enable" ] ; then
+        log Info "IPv6 协议栈: [正在使用]."
+        rm -f "${ipv6_disabled_flag}"
+    else
+        disable_ipv6
+        echo 1 > "${ipv6_disabled_flag}"
+        log Warn "IPv6 协议栈: [已禁用]."
+    fi
+
+    if [ "${proxy_mode}" = "core" ]; then
+        log Info "运行模式: ${proxy_mode} (TUN 纯内核转发)."
+        tun_forward_enable
+        return 0
+    fi
+
     if ! probe_user_group ; then
-      log Error "检查Box用户组失败，请确保 ${bin_name} 核心已启动."
+      log Error "环境检查: [${bin_name}] 已停止运行，服务已终止."
       return 1
     fi
-
     find_packages_uid
-    intranet[${#intranet[@]}]=$(ip -4 a | awk '/inet/ {print $2}' | grep -vE "^127.0.0.1")
+    optimize_kernel
+
+    for ip in $(${SYS_IP} -4 a | awk '/inet/ {print $2}' | grep -vE "^127.0.0.1"); do
+      intranet[${#intranet[@]}]="$ip"
+    done
+    log Info "网络拓扑: 局域网路由豁免列表已同步."
 
     if [ "${proxy_method}" = "TPROXY" ] ; then
-      if (zcat /proc/config.gz | grep -q TPROXY) ; then
-        log Info "使用 TPROXY: TCP+UDP"
-        log Info "正在创建透明代理规则..."
-        iptables="iptables -w 100"
-        start_tproxy && log Info "创建 iptables 透明代理规则完成." || (log Error "创建 iptables 透明代理规则失败." && stop_tproxy >> /dev/null 2>&1)
+      if check_tproxy_support ; then
+        log Info "运行模式: [TPROXY] 全双工 TCP+UDP."
+        iptables="${SYS_IPTABLES} -w 100"
+        if start_tproxy; then
+          log Info "IPv4 防火墙规则部署完成."
+        else
+          log Error "IPv4 防火墙规则部署失败，正在回滚清理残留."
+          iptables="${SYS_IPTABLES} -w 100" && stop_tproxy >/dev/null 2>&1
+        fi
 
         if [ "${ipv6}" = "enable" ] ; then
-          log Debug "IPv6: 正在使用"
-          enable_ipv6
-          iptables="ip6tables -w 100"
-          intranet6[${#intranet6[@]}]=$(ip -6 a | awk '/inet6/ {print $2}' | grep -vE "^fe80|^::1")
-          start_tproxy && log Info "创建 ip6tables 透明代理规则完成." || (log Error "创建 ip6tables 透明代理规则失败." && stop_tproxy >> /dev/null 2>&1)
-        else
-          log Warn "IPv6 模式: 禁用"
-          disable_ipv6
+          iptables="${SYS_IP6TABLES} -w 100"
+          for ip6 in $(${SYS_IP} -6 a | awk '/inet6/ {print $2}' | grep -vE "^fe80|^::1"); do
+            intranet6[${#intranet6[@]}]="$ip6"
+          done
+          if start_tproxy; then
+            log Info "IPv6 防火墙规则部署完成，双栈环境已就绪."
+          else
+            log Error "IPv6 防火墙规则部署失败，正在回滚清理残留."
+            iptables="${SYS_IP6TABLES} -w 100" && stop_tproxy >/dev/null 2>&1
+          fi
         fi
       else
-        log Warn "设备不支持 TPROXY，切换至 REDIRECT 代理方法"
-        log Info "使用 REDIRECT: TCP"
-        log Info "正在创建透明代理规则..."
-        iptables="iptables -w 100"
-        start_redirect && log Info "创建 iptables 透明代理规则完成." || (log Error "创建 iptables 透明代理规则失败." && stop_redirect >> /dev/null 2>&1)
-
-        if [ "${ipv6}" = "enable" ] ; then
-          enable_ipv6
-          log Warn "IPv6 模式: 启用"
-        else
-          disable_ipv6
-          log Warn "IPv6 模式: 禁用"
-        fi
-      fi
-    else
-      [ "${proxy_method}" = "REDIRECT" ] && log Info "使用 REDIRECT: TCP" || log Info "使用 MIXED: TCP+TUN"
-      log Info "正在创建透明代理规则..."
-      iptables="iptables -w 100"
-      start_redirect && log Info "创建 iptables 透明代理规则完成." || (log Error "创建 iptables 透明代理规则失败." && stop_redirect >> /dev/null 2>&1)
-
-      if [ "${ipv6}" = "enable" ] ; then
-        enable_ipv6
-        log Warn "IPv6 模式: 启用"
-      else
-        disable_ipv6
-        log Warn "IPv6 模式: 禁用"
+        log Warn "内核警告: 当前系统不支持 TPROXY，已自动降级至 REDIRECT 模式."
+        proxy_method="REDIRECT_FALLBACK"
       fi
     fi
+
+    if [ "${proxy_method}" != "TPROXY" ]; then
+      if [ "${proxy_method}" = "REDIRECT" ] || [ "${proxy_method}" = "REDIRECT_FALLBACK" ]; then
+        log Info "运行模式: [REDIRECT] 单工 TCP REDIRECT."
+      else
+        log Info "运行模式: [MIXED] 混合模式 TCP(REDIRECT) + UDP(TUN)."
+      fi
+      iptables="${SYS_IPTABLES} -w 100"
+      if start_redirect; then
+        log Info "IPv4 REDIRECT 规则部署完成."
+      else
+        log Error "IPv4 REDIRECT 规则部署失败，正在回滚清理残留."
+        iptables="${SYS_IPTABLES} -w 100" && stop_redirect >/dev/null 2>&1
+      fi
+    fi
+
+    tun_forward_enable
+    log Info "服务已启动完毕."
+    "${scripts_dir}/ctr.inotify" w >/dev/null 2>&1 &
     ;;
 
   disable)
-    log Warn "正在清理 ip(6)tables 透明代理规则..."
-    probe_user_group
-    iptables="iptables -w 100" && stop_tproxy >> /dev/null 2>&1
-    iptables="ip6tables -w 100" && stop_tproxy >> /dev/null 2>&1
-    iptables="iptables -w 100" && stop_redirect >> /dev/null 2>&1
-    log Warn "清理完成"
+    pgrep -f "$0 enable" | grep -v $$ | xargs kill -9 > /dev/null 2>&1
+    log Warn "iptables: 正在执行全局卸载复位."
+    destroy_all_rules
+    sleep 1
 
-    enable_ipv6
-    log Info "IPv6 已恢复默认启用"
+    if [ -f "${ipv6_disabled_flag}" ]; then
+      enable_ipv6
+      rm -f "${ipv6_disabled_flag}"
+      log Info "IPv6 协议栈: [已恢复]."
+    fi
+
+    log Info "卸载完成: 防火墙已复位，规则已清空完毕."
+    log Info "服务已停止运行."
     return 0
     ;;
 
   renew)
-    log Warn "正在重新应用透明代理规则..."
-    iptables="iptables -w 100" && stop_tproxy >> /dev/null 2>&1
-    iptables="ip6tables -w 100" && stop_tproxy >> /dev/null 2>&1
-    iptables="iptables -w 100" && stop_redirect >> /dev/null 2>&1
-    log Warn "旧规则已清理"
+    log Warn "iptables: 正在触发防火墙规则重构序列."
+    destroy_all_rules
+    log Info "环境复位: 旧规则已清理，等待状态重置."
+
+    if [ -f "${ipv6_disabled_flag}" ]; then
+      disable_ipv6
+      log Warn "IPv6 协议栈: [已重新禁用]."
+    else
+      log Info "IPv6 协议栈: [正在使用]."
+    fi
+
     sleep 3
 
+    if [ "${proxy_mode}" = "core" ]; then
+        tun_forward_enable
+        log Info "规则重构完成 (TUN 纯内核转发)."
+        return 0
+    fi
+
     if ! probe_user_group ; then
-      log Error "检查Box用户组失败，请确保 ${bin_name} 核心已启动."
+      log Error "环境检查: 核心进程心跳丢失，重构中止."
       return 1
     fi
 
     find_packages_uid
-    intranet[${#intranet[@]}]=$(ip -4 a | awk '/inet/ {print $2}' | grep -vE "^127.0.0.1")
+    for ip in $(${SYS_IP} -4 a | awk '/inet/ {print $2}' | grep -vE "^127.0.0.1"); do
+      intranet[${#intranet[@]}]="$ip"
+    done
+    log Info "网络拓扑: 本地网段变更已同步."
 
     if [ "${proxy_method}" = "TPROXY" ] ; then
-      log Info "重新应用 TPROXY 规则..."
-
-      iptables="iptables -w 100"
-      start_tproxy && log Info "重新创建 iptables 透明代理规则完成." || (log Error "创建失败." && stop_tproxy >> /dev/null 2>&1)
+      log Info "重构序列: 正在重新部署 TPROXY 规则."
+      iptables="${SYS_IPTABLES} -w 100"
+      if start_tproxy; then
+        log Info "IPv4 重构成功."
+      else
+        log Error "IPv4 重构失败，正在回滚清理残留."
+        iptables="${SYS_IPTABLES} -w 100" && stop_tproxy >/dev/null 2>&1
+      fi
 
       if [ "${ipv6}" = "enable" ] ; then
-        log Debug "IPv6: 正在使用"
-        enable_ipv6
-        iptables="ip6tables -w 100"
-        intranet6[${#intranet6[@]}]=$(ip -6 a | awk '/inet6/ {print $2}' | grep -vE "^fe80|^::1")
-        start_tproxy && log Info "重新创建 ip6tables 透明代理规则完成." || (log Error "创建失败." && stop_tproxy >> /dev/null 2>&1)
-      else
-        disable_ipv6
-        log Warn "IPv6 模式: 禁用"
+        iptables="${SYS_IP6TABLES} -w 100"
+        for ip6 in $(${SYS_IP} -6 a | awk '/inet6/ {print $2}' | grep -vE "^fe80|^::1"); do
+          intranet6[${#intranet6[@]}]="$ip6"
+        done
+        if start_tproxy; then
+          log Info "IPv6 重构成功."
+        else
+          log Error "IPv6 重构失败，正在回滚清理残留."
+          iptables="${SYS_IP6TABLES} -w 100" && stop_tproxy >/dev/null 2>&1
+        fi
       fi
     else
-      log Info "重新应用 REDIRECT 规则..."
-      iptables="iptables -w 100"
-      start_redirect && log Info "重新创建 iptables 透明代理规则完成。" || (log Error "创建失败." && stop_redirect >> /dev/null 2>&1)
+      log Info "重构序列: 正在重新部署 REDIRECT 规则."
+      iptables="${SYS_IPTABLES} -w 100"
+      if start_redirect; then
+        log Info "REDIRECT 重构成功."
+      else
+        log Error "REDIRECT 重构失败，正在回滚清理残留."
+        iptables="${SYS_IPTABLES} -w 100" && stop_redirect >/dev/null 2>&1
+      fi
     fi
+
+    tun_forward_enable
+    log Info "防火墙规则重构完毕，服务已恢复运行."
+   "${scripts_dir}/ctr.inotify" w >/dev/null 2>&1 &
     ;;
 
   enable_ipv6)
     enable_ipv6
-    log Warn "IPv6 已启用"
+    log Info "IPv6 协议栈已手动挂载."
     ;;
 
   disable_ipv6)
     disable_ipv6
-    log Warn "IPv6 已禁用"
+    log Warn "IPv6 协议栈已手动卸载."
+    ;;
+
+  tun_forward_enable)
+    tun_forward_enable
+    ;;
+
+  tun_forward_disable)
+    tun_forward_disable
     ;;
 
   *)
-    log Error "用法: $0 {enable|disable|renew|enable_ipv6|disable_ipv6}"
+    log Error "相关指令: $0 {enable|disable|renew|enable_ipv6|disable_ipv6|tun_forward_enable|tun_forward_disable}"
     ;;
 esac

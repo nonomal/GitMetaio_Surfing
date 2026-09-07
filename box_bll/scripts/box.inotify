@@ -1,32 +1,45 @@
 #!/system/bin/sh
-
-export PATH="/data/adb/magisk:/data/adb/ksu/bin:/data/adb/ap/bin:$PATH:/data/data/com.termux/files/usr/bin"
+export PATH="/data/adb/box_bll/bin:$PATH"
 
 EVENT=$1
 MONITOR_DIR=$2
 MONITOR_FILE=$3
 
-SCRIPTS=$(realpath $0)
-SCRIPTS_DIR=$(dirname ${SCRIPTS})
+SCRIPTS=$(realpath "$0")
+SCRIPTS_DIR=$(dirname "${SCRIPTS}")
 
-source ${SCRIPTS_DIR}/box.config
+. "${SCRIPTS_DIR}/box.config"
+
+export TZ=Asia/Shanghai
+RUN_LOG="${run_path}/run.log"
+ERR_LOG="${run_path}/run_error.log"
+
+mkdir -p "${run_path}"
+
+log() {
+    local now=$(date +"[%Y-%m-%d %H:%M:%S %Z]")
+    local level=$1
+    local msg=$2
+    printf "%s [%s]: %s\n" "${now}" "${level}" "${msg}" >> "${RUN_LOG}"
+}
 
 SERVICE_PATH="${SCRIPTS_DIR}/box.service"
 TPROXY_PATH="${SCRIPTS_DIR}/box.iptables"
 INOTIFY_SCRIPT="/data/adb/box_bll/scripts/box.inotify"
-HOSTS_PATH="/data/adb/box_bll/clash/etc/"
+HOSTS_PATH="/data/adb/box_bll/clash/etc"
 HOSTS_FILE="/data/adb/box_bll/clash/etc/hosts"
 SYSTEM_HOSTS="/system/etc/hosts"
-mkdir -p "${run_path}"
 
 service_control() {
     if [ ! -f "${box_path}/manual" ] && [ "${MONITOR_FILE}" = "disable" ]; then
         if [ "${EVENT}" = "d" ]; then
-            ${SERVICE_PATH} start >> "${run_path}/run.log" 2>> "${run_path}/run_error.log"
-            ${TPROXY_PATH} enable >> "${run_path}/run.log" 2>> "${run_path}/run_error.log"
+            log Info "正在启动 Surfing for Box 服务."
+            "${SERVICE_PATH}" start >> "${RUN_LOG}" 2>> "${ERR_LOG}"
+            "${TPROXY_PATH}" enable >> "${RUN_LOG}" 2>> "${ERR_LOG}"
         elif [ "${EVENT}" = "n" ]; then
-            ${TPROXY_PATH} disable >> "${run_path}/run.log" 2>> "${run_path}/run_error.log"
-            ${SERVICE_PATH} stop >> "${run_path}/run.log" 2>> "${run_path}/run_error.log"
+            log Warn "正在停止 Surfing for Box 服务."
+            "${SERVICE_PATH}" stop >> "${RUN_LOG}" 2>> "${ERR_LOG}"
+            "${TPROXY_PATH}" disable >> "${RUN_LOG}" 2>> "${ERR_LOG}"
         fi
     fi
 }
@@ -35,14 +48,28 @@ service_control
 handle_hosts_event() {
     if [ "$MONITOR_FILE" = "hosts" ]; then
         case "$EVENT" in
-            m|c|d)
-                sleep 1
-                umount "$SYSTEM_HOSTS" 2>/dev/null
+            m|c|n)
+                local lock_file="/dev/tmp/hosts_inotify.lock"
+                local current_time=$(date +%s)
+                if [ -f "$lock_file" ]; then
+                    read last_time < "$lock_file"
+                    [ $((current_time - last_time)) -lt 2 ] && return 0
+                fi
+                echo "$current_time" > "$lock_file"
+                
+                log Info "Hosts 已变动，正在执行重新映射."
+                umount -l "$SYSTEM_HOSTS" >/dev/null 2>&1
                 if [ -f "$HOSTS_FILE" ]; then
-                    mount -o bind "$HOSTS_FILE" "$SYSTEM_HOSTS" 2>/dev/null
+                    if mount -o bind "$HOSTS_FILE" "$SYSTEM_HOSTS" >/dev/null 2>&1; then
+                        log Info "Hosts 动态挂载成功."
+                    else
+                        log Error "Hosts 挂载失败."
+                    fi
                 fi
                 ;;
-            *)
+            d)
+                log Warn "Hosts 文件已删除，正在还原系统原生状态."
+                umount -l "$SYSTEM_HOSTS" >/dev/null 2>&1
                 ;;
         esac
     fi
@@ -50,13 +77,17 @@ handle_hosts_event() {
 handle_hosts_event
 
 handle_inotify_event() {
-    if [ ! -d "$HOSTS_PATH" ]; then
-        mkdir -p "$HOSTS_PATH"
-        while pgrep -f "inotifyd $INOTIFY_SCRIPT $HOSTS_PATH" > /dev/null; do
-            pkill -9 -f "inotifyd $INOTIFY_SCRIPT $HOSTS_PATH"
-            sleep 1
-        done
-        inotifyd "$INOTIFY_SCRIPT" "$HOSTS_PATH" >/dev/null 2>&1 &
+    [ ! -d "$HOSTS_PATH" ] && mkdir -p "$HOSTS_PATH"
+
+    if ! pgrep -f "inotifyd $INOTIFY_SCRIPT $HOSTS_PATH" > /dev/null; then
+        log Warn "Hosts 监听中断，执行自愈重建."
+        pkill -9 -f "inotifyd $INOTIFY_SCRIPT $HOSTS_PATH" >/dev/null 2>&1
+        sleep 1
+        nohup inotifyd "$INOTIFY_SCRIPT" "$HOSTS_PATH" >/dev/null 2>&1 &
+        
+        if [ $? -eq 0 ]; then
+            log Info "守护进程已在后台重建运行."
+        fi
     fi
 }
 handle_inotify_event

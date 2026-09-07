@@ -1,4 +1,4 @@
-name: release
+name: Release
 
 on:
   push:
@@ -9,19 +9,20 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  Production-Build:
     runs-on: ubuntu-latest
 
     env:
       isAlpha: false
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
-      - name: Get version number
+      - name: Get Version number
         id: version
         run: |
           version=$(grep 'version=' module.prop | awk -F '=' '{print $2}' | sed 's/ (.*)//')
@@ -44,11 +45,9 @@ jobs:
           echo "CHANGELOG=release_notes.txt" >> $GITHUB_ENV
 
       - name: Upload Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.TAG_NAME }}
-          files: Surfing_v*.zip
+          files: Surfing_${{ env.TAG_NAME }}_release.zip
           generate_release_notes: false
           body_path: release_notes.txt
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
